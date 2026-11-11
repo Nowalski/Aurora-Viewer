@@ -8839,11 +8839,16 @@ impl Backend {
                                 continue;
                             }
                             let run = (b0 + from as u64 * stride, end - from);
-                            blended(&mut pass, &self.pipelines.blend_depth_solid, from, end);
-                            draw_sided(&mut pass, &self.pipelines.blend_depth_fringe, run, from);
-                            // (not those of eyelashes drawn before the
-                            // hair: their card's empty part would cut it, #2121)
-                            if lists.blend_depth_quiet.binary_search(&end).is_err() {
+                            if lists.blend_depth_quiet.binary_search(&end).is_ok() {
+                                // eyelashes and brows, drawn before the hair:
+                                // their colour only, writing no depth, so
+                                // that no texel of theirs, nor their
+                                // card's nearly empty part, cuts the hair
+                                // drawn after them in straight edges (#2121)
+                                blended(&mut pass, &self.pipelines.blend_depth_color, from, end);
+                            } else {
+                                blended(&mut pass, &self.pipelines.blend_depth_solid, from, end);
+                                draw_sided(&mut pass, &self.pipelines.blend_depth_fringe, run, from);
                                 draw_sided(&mut pass, &self.pipelines.blend_depth_fringe_depth, run, from);
                             }
                             from = end;

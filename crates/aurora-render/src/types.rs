@@ -595,8 +595,8 @@ pub struct DrawLists {
     /// one `blend_depth`).
     pub blend_depth_runs: Vec<u32>,
     /// `RiggedBlendDepth::Layers`: the ends, among `blend_depth_runs`, of the
-    /// runs whose fringes write no depth (eyelashes and brows drawn before
-    /// the hair, #2121; increasing).
+    /// runs drawn writing no depth on the copy, their colour only (eyelashes
+    /// and brows drawn before the hair, #2121; increasing).
     pub blend_depth_quiet: Vec<u32>,
     /// Per `blend` entry: the face has glow (drawn into the glow right
     /// after it, as LLDrawPoolAlpha's emissives).

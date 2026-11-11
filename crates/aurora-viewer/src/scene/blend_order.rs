@@ -129,9 +129,8 @@ pub struct RigOrder {
     /// Its own local id: the prims of a linkset in that order.
     pub local: u32,
     /// Its mesh moves with the face only (`face_detail`): eyelashes,
-    /// brows. Drawn before the other rigged meshes of its skeleton, and its
-    /// fringes write no depth (`DrawLists::blend_depth_quiet`), see
-    /// `draw_cmp`.
+    /// brows. Drawn before the other rigged meshes of its skeleton, writing
+    /// no depth for them (`quiet_runs`), see `draw_cmp`.
     pub face_detail: bool,
 }
 
@@ -191,8 +190,8 @@ impl RigOrder {
     /// that they vanished wherever they met the hair, the skin showing
     /// through its soft strands instead (#2121; with the lashes in Masking
     /// they were drawn before it and looked right, but jagged). Drawn
-    /// first, the hair blends over them where it is in front and they show
-    /// in front of it where they are.
+    /// first and writing no depth for the hair (`quiet_runs`), the hair
+    /// blends over them as over the skin.
     fn draw_cmp(&self, other: &RigOrder) -> Ordering {
         other
             .face_detail
@@ -413,11 +412,14 @@ pub fn each_object(entries: &[BlendEntry], n: usize, out: &mut Vec<u32>) {
 
 /// `RiggedBlendDepth::Layers`: of the runs `runs` (`each_object`) of the
 /// sorted entries, the ends of those of a detail of the face
-/// (`RigOrder::face_detail`), whose fringes then write no depth
-/// (`DrawLists::blend_depth_quiet`). Drawn before the hair, the nearly
-/// transparent part of an eyelash card would otherwise hide the strands
-/// behind it from 1/255, holes the shape of the card in the hair (#2121);
-/// what is at least half covered still writes its depth.
+/// (`RigOrder::face_detail`), drawn then writing no depth on the copy, their
+/// colour only (`DrawLists::blend_depth_quiet`). Drawn before the hair, an
+/// eyelash card would otherwise hide the strands behind it, from 1/255 its
+/// nearly empty part and from one half its dense lashes, blurred into a
+/// band by the mipmaps: holes and straight edges the shape of the card in
+/// the hair (#2121). The hair then blends over the lashes even where a lash
+/// tip is in front of a strand, faint and soft rather than cut. The scene
+/// depth still takes them where half covered, for what comes after.
 pub fn quiet_runs(entries: &[BlendEntry], runs: &[u32], out: &mut Vec<u32>) {
     out.clear();
     out.extend(runs.iter().copied().filter(|&end| {
