@@ -44,10 +44,12 @@
 //! the fainter texels came after, writing nothing (`Split`): a mesh drawn
 //! after a sheer dress and under it (a body add-on) showed through the
 //! dress wherever its alpha fell under one half, in speckles (#1300). Now
-//! each object's fringes also write their depth from 1/255, after all of
-//! its colour, into a copy of the scene depth (`Layers`): a mesh drawn after
-//! another and behind it is hidden by any of its texels, as in the Legacy
-//! Viewer, while one object's soft edges still hide none of its own strands.
+//! each object's fringes also write their depth, after all of its colour,
+//! into a copy of the scene depth (`Layers`): a mesh drawn after another and
+//! behind it is hidden by any of its texels, as in the Legacy Viewer, while
+//! one object's soft edges still hide none of its own strands. From 10 %,
+//! not the Legacy Viewer's 1/255: the nearly invisible part of an eyelash
+//! card cut holes the shape of the card in the hair drawn after it (#2121).
 
 use std::cmp::Ordering;
 

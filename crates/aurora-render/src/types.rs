@@ -532,8 +532,10 @@ pub enum RiggedBlendDepth {
     Split,
     /// `Split`, one object per run, into a copy of the scene depth
     /// (`Targets::blend_layers`), each run's fringes then writing their depth
-    /// there from 1/255 (#1300): a mesh drawn after another and behind it is
-    /// hidden by any of its texels, as with the Legacy Viewer's 1/255, while
+    /// there from 10 % (#1300, `RIGGED_FRINGE_DEPTH_ALPHA`): a mesh drawn
+    /// after another and behind it is hidden by any of its texels that can
+    /// be seen, as with the Legacy Viewer's 1/255 but for the nearly
+    /// invisible ones (an eyelash card's empty part, #2121), while
     /// the texels of one object still never hide each other by a soft edge
     /// (no shards, #935). The scene depth then takes the rigged faces where
     /// half covered only, for the glass, water and particles drawn after

@@ -703,6 +703,17 @@ fn motion_view<'a>(motion_now: bool, targets: &'a Targets, taa: Option<&'a Taa>)
 /// tips) leave the motion to what is behind them.
 const FSR_BLEND_ALPHA: f64 = 0.1;
 
+/// The coverage from which a rigged blended face's fainter texels hide what
+/// is drawn after them and behind them (`RiggedBlendDepth::Layers`,
+/// `blend_depth_fringe_depth`, #1300). The Legacy Viewer writes depth from
+/// 1/255 (MINIMUM_ALPHA, LLDrawPoolAlpha::forwardRender(true)): the
+/// "empty" part of an eyelash card, a few 255ths that nobody sees, then
+/// cuts the hair drawn after it into holes the shape of the card (#2121).
+/// From 10 % (the Legacy Viewer's MINIMUM_IMPOSTOR_ALPHA) such texels hide
+/// nothing; a sheer dress, never under 25 %, still hides the body add-on
+/// under it (#1300). A deliberate difference from the Legacy Viewer.
+pub(crate) const RIGGED_FRINGE_DEPTH_ALPHA: f64 = 0.1;
+
 /// FSR's upscale ratio under `aa`, none without FSR.
 fn fsr_ratio(aa: AntiAliasing) -> Option<f32> {
     match aa {
@@ -3901,15 +3912,15 @@ impl Backend {
             ..base("blend rigged fringe", "vs_main", "fs_blend")
         });
         // `RiggedBlendDepth::Layers` (#1300): after an object's fringes,
-        // their depth from 1/255 (MINIMUM_ALPHA), so that what is drawn
-        // after them and behind them is hidden, as in the Legacy Viewer
+        // their depth from `RIGGED_FRINGE_DEPTH_ALPHA`, so that what is
+        // drawn after them and behind them is hidden
         let blend_depth_fringe_depth = sided_pipe(PipeDesc {
             fs: Some("fs_depth_contact"),
             blend: None,
             write_mask: wgpu::ColorWrites::empty(),
             depth_write: true,
             depth_compare: wgpu::CompareFunction::Greater,
-            constants: &[("DEPTH_CONTACT_ALPHA", 0.004), ("WATER_CLIP", 1.0)],
+            constants: &[("DEPTH_CONTACT_ALPHA", RIGGED_FRINGE_DEPTH_ALPHA), ("WATER_CLIP", 1.0)],
             ..base("blend rigged fringe depth", "vs_main", "fs_blend")
         });
         let particles = pipe(PipeDesc {

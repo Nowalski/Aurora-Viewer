@@ -4531,7 +4531,7 @@ both open states and the selection count. Capture at frame 620.
 | `AURORA_DEMO_WET_LAYER=1` | Three spheres under transparent shells, two with a shiny blended legacy material: the wet layers of mesh bodies (#1420) |
 | `AURORA_DEMO_LASHES=1` | With `AURORA_DEMO_HAIR`: a red ball worn inside our hair, as eyelashes behind a fringe |
 | `AURORA_DEMO_HAIR_CARDS=<n>[,layered[,outer]]` | Our avatar wears one face of `n` soft strand cards, overlapping in a shuffled order, or layered as a hair is made (#935) |
-| `AURORA_DEMO_SHEER=1` | Our avatar wears a sheer knit dress over a red layer drawn after it (#1300) |
+| `AURORA_DEMO_SHEER=1` or `faint` | Our avatar wears a sheer knit dress over a red layer drawn after it (#1300); `faint`: bands of the dress nearly invisible, as an eyelash card (#2121) |
 | `AURORA_DEMO_SOFT_MASK=1` | Our avatar wears a skin-tone Mask disc on the groin; soft fringe must stay visible (#1492) |
 | `AURORA_DEMO_BUMP=tall`, `wide` or `sphere` | The normal-mapped test panel stretched 4:1, its normal map denser across or along it; or a low-poly ball with a baked normal map (tangent frame) |
 | `AURORA_DEMO_LEGACY_BUMP=1` or `matrix` | Legacy bump presets and normal-map precedence; `matrix` covers all four Shininess levels |
@@ -4696,7 +4696,13 @@ both open states and the selection count. Capture at frame 620.
   hides the red layer everywhere and shows the body behind it, as the
   Legacy Viewer; with `AURORA_RIGGED_BLEND=split` the red layer shows
   through the dress in speckles, wherever its alpha is under one half. The
-  default camera looks at our avatar's back.
+  default camera looks at our avatar's back. `AURORA_DEMO_SHEER=faint`:
+  every other band of 32 texels of the dress at 3/255, nearly invisible, as
+  the "empty" part of an eyelash card (#2121): the red layer shows in those
+  bands, the knit between them still hides it; with
+  `AURORA_RIGGED_BLEND=write` (the Legacy Viewer's 1/255) the bands are
+  holes through the red layer down to the body, as eyelashes cutting mesh
+  hair.
 - **`AURORA_DEMO_SOFT_MASK=1`** (with or without `AURORA_DEMO_HAIR`): our
   avatar wears a skin-tone disc on the groin (attach point 53), rigged to
   `mPelvis`. Its texture classifies as Mask (opaque centre, two-texel soft
@@ -10499,7 +10505,7 @@ What the inventory must show with these scenarios:
 | `AURORA_AUTO_EXPOSURE=0`, `1` or `alt` | Automatic exposure of non-classic skies off, on or one second in two |
 | `AURORA_SPECULAR_AA=0`, `1` or `alt` | Specular anti-aliasing off, on or one second in two for this launch |
 | `AURORA_COLORED_AMBIENT=0`, `1` or `alt` | Sky ambient softened, grey under linear and HDR skies (Legacy Viewer), coloured at full strength like the first PBR release, or one second in two |
-| `AURORA_RIGGED_BLEND=split`, `runs`, `copy`, `depth05`, `write`, `sorted` or `alt` | Depth of the blended faces of rigged meshes: object by object, what is half covered writing its depth as drawn, then the fainter texels, then their depth from 1/255 on a copy (default); the same without the fainter texels' depth (#1024); where nearly opaque before their colour, then point by point where half covered (#966); from 1/255 on a copy (#948); where half covered before their colour; from 1/255; none (sorted with the others); or `split` by turns |
+| `AURORA_RIGGED_BLEND=split`, `runs`, `copy`, `depth05`, `write`, `sorted` or `alt` | Depth of the blended faces of rigged meshes: object by object, what is half covered writing its depth as drawn, then the fainter texels, then their depth from 10 % on a copy (default); the same without the fainter texels' depth (#1024); where nearly opaque before their colour, then point by point where half covered (#966); from 1/255 on a copy (#948); where half covered before their colour; from 1/255; none (sorted with the others); or `split` by turns |
 | `AURORA_MESH_ORDER=asset` | Mesh faces keep the triangle order of the asset instead of the Legacy Viewer's vertex cache order |
 | `AURORA_DEBUG_GEOM_DELAY=<seconds>` | Every built geometry reaches the GPU that long after its job ended, as on a slow PC in a busy region |
 | `AURORA_BLEND_AO=new`, `none`, `old` or `alt` | Which blended faces take the screen-space occlusion and indirect light: those at least half covered (default), none, all, or `none` by turns |
@@ -11058,9 +11064,11 @@ What the inventory must show with these scenarios:
   their texels at least half
   covered are drawn first, each writing its depth as it is drawn, as the
   Legacy Viewer's alpha pass does from 1/255; then their fainter texels,
-  depth tested; then the depth of those fainter texels, from 1/255. An
-  object hides what is drawn after it and behind it wherever it has a
-  texel, as in the Legacy Viewer (a sheer dress hides a body add-on drawn
+  depth tested; then the depth of those fainter texels, from 10 % (the
+  Legacy Viewer from 1/255: the nearly invisible part of an eyelash card
+  cut holes in the hair drawn after it, #2121, `AURORA_DEMO_SHEER=faint`).
+  An object hides what is drawn after it and behind it wherever it has a
+  texel that can be seen, as in the Legacy Viewer (a sheer dress hides a body add-on drawn
   after it, #1300, `AURORA_DEMO_SHEER`), but none of its own strands
   behind a soft edge: a hair made inner
   layer first composes as its creator saw it, an inner layer drawn after
