@@ -8841,7 +8841,11 @@ impl Backend {
                             let run = (b0 + from as u64 * stride, end - from);
                             blended(&mut pass, &self.pipelines.blend_depth_solid, from, end);
                             draw_sided(&mut pass, &self.pipelines.blend_depth_fringe, run, from);
-                            draw_sided(&mut pass, &self.pipelines.blend_depth_fringe_depth, run, from);
+                            // (not those of eyelashes drawn before the
+                            // hair: their card's empty part would cut it, #2121)
+                            if lists.blend_depth_quiet.binary_search(&end).is_err() {
+                                draw_sided(&mut pass, &self.pipelines.blend_depth_fringe_depth, run, from);
+                            }
                             from = end;
                         }
                     }
