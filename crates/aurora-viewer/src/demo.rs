@@ -7657,10 +7657,7 @@ pub fn lights_events(n: u32) -> Vec<NetEvent> {
 /// a sheer white dress around the torso, its alpha wavering from texel to
 /// texel between 0.25 and 0.75 (a knit), and under it a red layer (a body
 /// add-on), attached first on the same point so that it is drawn after the
-/// dress (#1300). AURORA_DEMO_SHEER=faint: the dress's stitches in every
-/// other band of 32 texels at 3/255 instead, nearly invisible, as the empty
-/// part of an eyelash card: the red layer drawn after it must show there,
-/// not the body through a hole (#2121).
+/// dress (#1300).
 /// AURORA_DEMO_SOFT_MASK=1: a skin-tone disc on the groin whose texture is
 /// classified as Mask (mostly binary alpha, short soft fringe). Without the
 /// rigged auto-Mask skip it would be punched out; with it, the soft fringe
@@ -7676,8 +7673,6 @@ pub struct HairDemo {
     pub layered: bool,
     pub outer_first: bool,
     pub sheer: bool,
-    /// AURORA_DEMO_SHEER=faint: bands of the dress nearly invisible (#2121).
-    pub sheer_faint: bool,
     pub soft_mask: bool,
 }
 
@@ -7688,9 +7683,7 @@ pub fn hair_demo() -> Option<HairDemo> {
     let cards_args: Vec<&str> = cards_args.collect();
     let layered = cards > 0 && cards_args.contains(&"layered");
     let outer_first = layered && cards_args.contains(&"outer");
-    let sheer_var = std::env::var("AURORA_DEMO_SHEER").unwrap_or_default();
-    let sheer_faint = sheer_var.trim() == "faint";
-    let sheer = sheer_faint || sheer_var.trim() == "1";
+    let sheer = std::env::var("AURORA_DEMO_SHEER").is_ok_and(|v| v.trim() == "1");
     let soft_mask = std::env::var("AURORA_DEMO_SOFT_MASK").is_ok_and(|v| v.trim() == "1");
     let demo = match std::env::var("AURORA_DEMO_HAIR").ok() {
         Some(v) => hair_demo_from(&v),
@@ -7706,7 +7699,6 @@ pub fn hair_demo() -> Option<HairDemo> {
         layered,
         outer_first,
         sheer,
-        sheer_faint,
         soft_mask,
         ..demo
     })
@@ -7727,7 +7719,6 @@ fn hair_demo_from(v: &str) -> HairDemo {
         layered: false,
         outer_first: false,
         sheer: false,
-        sheer_faint: false,
         soft_mask: false,
     }
 }
@@ -8115,9 +8106,7 @@ fn hair_card_layered_texture() -> (Vec<u8>, u32, u32) {
 /// Pixels of [`TEX_SHEER`] (RGBA8, 256×256): a white knit whose alpha
 /// wavers between 0.25 and 0.75 from one 4-texel stitch to the next, so
 /// that it crosses one half everywhere, even through the coarser mips.
-/// `faint`: every other band of 32 texels at 3/255 instead, the nearly
-/// invisible "empty" part of an eyelash card (#2121).
-fn sheer_texture(faint: bool) -> (Vec<u8>, u32, u32) {
+fn sheer_texture() -> (Vec<u8>, u32, u32) {
     const N: u32 = 256;
     let mut px = Vec::with_capacity((N * N * 4) as usize);
     for y in 0..N {
@@ -8125,8 +8114,7 @@ fn sheer_texture(faint: bool) -> (Vec<u8>, u32, u32) {
             let stitch = (x / 4).wrapping_mul(73_856_093) ^ (y / 4).wrapping_mul(19_349_663);
             let h = stitch.wrapping_mul(2_654_435_761) >> 24;
             let alpha = 0.25 + 0.5 * h as f32 / 255.0;
-            let alpha = if faint && (x / 32) % 2 == 1 { 3 } else { (255.0 * alpha) as u8 };
-            px.extend_from_slice(&[245, 243, 240, alpha]);
+            px.extend_from_slice(&[245, 243, 240, (255.0 * alpha) as u8]);
         }
     }
     (px, N, N)
@@ -8788,7 +8776,7 @@ pub fn local_texture(id: &Uuid) -> Option<(Vec<u8>, u32, u32)> {
         return Some(hair_card_layered_texture());
     }
     if *id == TEX_SHEER {
-        return Some(sheer_texture(hair_demo().is_some_and(|h| h.sheer_faint)));
+        return Some(sheer_texture());
     }
     if *id == TEX_SOFT_MASK {
         return Some(soft_mask_texture());
