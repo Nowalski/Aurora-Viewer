@@ -709,10 +709,13 @@ const FSR_BLEND_ALPHA: f64 = 0.1;
 /// 1/255 (MINIMUM_ALPHA, LLDrawPoolAlpha::forwardRender(true)): the
 /// "empty" part of an eyelash card, a few 255ths that nobody sees, then
 /// cuts the hair drawn after it into holes the shape of the card (#2121).
-/// From 10 % (the Legacy Viewer's MINIMUM_IMPOSTOR_ALPHA) such texels hide
-/// nothing; a sheer dress, never under 25 %, still hides the body add-on
+/// From about a quarter (0.24, under the 63/255 of the demo knit's
+/// faintest stitch): under it a texel lets three quarters of what lies behind
+/// show, so drawing that over it changes little, while the faint edges of
+/// a lash card (10 % left thin streaks across the hair, on the grid) hide
+/// nothing. A sheer dress, never under 25 %, still hides the body add-on
 /// under it (#1300). A deliberate difference from the Legacy Viewer.
-pub(crate) const RIGGED_FRINGE_DEPTH_ALPHA: f64 = 0.1;
+pub(crate) const RIGGED_FRINGE_DEPTH_ALPHA: f64 = 0.24;
 
 /// FSR's upscale ratio under `aa`, none without FSR.
 fn fsr_ratio(aa: AntiAliasing) -> Option<f32> {

@@ -47,7 +47,7 @@
 //! each object's fringes also write their depth, after all of its colour,
 //! into a copy of the scene depth (`Layers`): a mesh drawn after another and
 //! behind it is hidden by any of its texels, as in the Legacy Viewer, while
-//! one object's soft edges still hide none of its own strands. From 10 %,
+//! one object's soft edges still hide none of its own strands. From 25 %,
 //! not the Legacy Viewer's 1/255: the nearly invisible part of an eyelash
 //! card cut holes the shape of the card in the hair drawn after it (#2121).
 
