@@ -418,13 +418,13 @@ fn sample_tex(t:u32,uv:vec2<f32>)->vec4<f32> {{return vec4<f32>(1.0,1.0,1.0,f32(
 /// `RiggedBlendDepth::Layers`: the fainter texels of a rigged blended face
 /// hide what is drawn after them only once they can be seen. The "empty"
 /// part of an eyelash card, a few 255ths, no longer cuts holes in the hair
-/// drawn after it (#2121); a sheer knit, 63/255 at its faintest, still hides
+/// drawn after it (#2121); a sheer knit, 25 % at its faintest, still hides
 /// the body add-on under it (#1300, `AURORA_DEMO_SHEER`).
 #[test]
 fn rigged_fringe_depth_skips_nearly_invisible_texels_only() {
     let threshold = std::hint::black_box(crate::renderer::RIGGED_FRINGE_DEPTH_ALPHA);
     let lash_card_empty = 3.0 / 255.0;
-    let sheer_knit_faintest = 63.0 / 255.0;
+    let sheer_knit_faintest = 0.25;
     assert!(lash_card_empty < threshold);
     assert!(threshold <= sheer_knit_faintest);
 }
