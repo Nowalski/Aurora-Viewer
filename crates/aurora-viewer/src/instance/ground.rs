@@ -73,14 +73,18 @@ fn rotation(a: [f32; 4]) -> Quat {
 }
 
 /// Sunk into a floor by less than this, we are lifted back on top (our own
-/// region let us sink through it); deeper, it is a room around us.
+/// region let us sink through it, or we arrived a little low); deeper, it is
+/// a room around us.
 const SUNK: f32 = 1.5;
 
 /// The floor under (`x`, `y`) for feet at `feet`: the land, or the highest
-/// top a step can reach or we sank a little into.
+/// top a step can reach or we sank a little into. A thin platform whose top
+/// is above our feet but within `SUNK` counts too, wherever its bottom is:
+/// we stand inside it, and it would otherwise be neither a floor nor
+/// passable, so we fell to the land under it.
 pub fn floor<'a>(land: f32, boxes: impl Iterator<Item = &'a Bounds>, x: f32, y: f32, feet: f32) -> f32 {
     boxes
-        .filter(|b| b.under(x, y) && (b.max.z <= feet + STEP || (b.min.z <= feet && b.max.z <= feet + SUNK)))
+        .filter(|b| b.under(x, y) && b.max.z <= feet + SUNK)
         .map(|b| b.max.z)
         .fold(land, f32::max)
 }
@@ -182,6 +186,19 @@ mod tests {
         // off the floor, the land
         let f = steer(0, Vec3::new(30.0, 5.0, 20.95), 0.0, land, &boxes);
         assert_eq!(f & (control::UP_POS | control::UP_NEG), 0);
+    }
+
+    #[test]
+    fn a_thin_platform_a_little_above_our_feet_lifts_us() {
+        // a 0.2 m platform whose bottom is 0.7 m above our feet: we stand
+        // inside it, so it is our floor, not the land below
+        let platform = slab([0.0, 0.0, 20.7], [10.0, 10.0, 20.9]);
+        let land = |_: f32, _: f32| 20.0;
+        assert!((floor(20.0, [platform].iter(), 5.0, 5.0, 20.0) - 20.9).abs() < 1e-4);
+        assert_ne!(steer(0, Vec3::new(5.0, 5.0, 20.95), 0.0, land, &[platform]) & control::UP_POS, 0);
+        // far above our feet it is a ceiling
+        let ceiling = slab([0.0, 0.0, 22.5], [10.0, 10.0, 22.7]);
+        assert!((floor(20.0, [ceiling].iter(), 5.0, 5.0, 20.0) - 20.0).abs() < 1e-4);
     }
 
     #[test]
