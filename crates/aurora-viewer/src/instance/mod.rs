@@ -10,6 +10,7 @@ pub mod capture;
 pub mod client;
 pub mod crowd;
 pub mod demo_peer;
+pub mod ground;
 pub mod hub;
 pub mod invite;
 pub mod mirror;
@@ -112,6 +113,9 @@ pub struct Instance {
     arrival: Arrival,
     /// The move inside our own region the app is to make.
     local_teleport: Option<Vec3>,
+    /// The boxes of the host's place, for `steer`, and when they were built.
+    bounds: Vec<ground::Bounds>,
+    bounds_at: Option<Instant>,
     /// What the app is to hide of our place (id, is an avatar), and to show
     /// again, while and after we visit.
     hide: Vec<(Uuid, bool)>,
@@ -203,6 +207,8 @@ impl Instance {
             meet,
             arrival: Arrival::Waiting,
             local_teleport: None,
+            bounds: Vec::new(),
+            bounds_at: None,
             hide: Vec::new(),
             show: Vec::new(),
         };
@@ -374,6 +380,30 @@ impl Instance {
         }
     }
 
+    /// Our controls while we visit, once we stand at the meeting point: the
+    /// host's place is solid for us (ground.rs). Boxes are rebuilt at most
+    /// once a second.
+    pub fn steer(&mut self, world: &World, flags: u32, now: Instant) -> u32 {
+        if self.visit.is_none() || !matches!(self.arrival, Arrival::Done) || world.agent.is_sitting() || world.teleporting {
+            return flags;
+        }
+        if self.bounds_at.is_none_or(|t| now.duration_since(t) > Duration::from_secs(1)) {
+            self.bounds = self.mirror.place_bounds();
+            self.bounds_at = Some(now);
+        }
+        let Some(region) = world.main() else {
+            return flags;
+        };
+        let map = &region.heightmap;
+        ground::steer(
+            flags,
+            world.agent.server_pos,
+            world.agent.yaw,
+            |x, y| map.sample(x, y),
+            &self.bounds,
+        )
+    }
+
     /// The move to a visit's meeting point, inside our own region, once.
     pub fn take_local_teleport(&mut self) -> Option<Vec3> {
         self.local_teleport.take()
@@ -464,6 +494,19 @@ impl Drop for Instance {
             Link::Guest(client) => client.send(bye),
             Link::Demo(_) => {}
         }
+    }
+}
+
+/// A simulator event, kept from what the instance shows: the simulator
+/// does not know the instance's objects (a right click asks it about one),
+/// and its removals of their ids are not for them.
+pub fn screen(event: NetEvent) -> Option<NetEvent> {
+    match event {
+        NetEvent::ObjectsKilled { handle, local_ids } => {
+            let kept: Vec<u32> = local_ids.into_iter().filter(|l| *l < mirror::FIRST_LOCAL_ID).collect();
+            (!kept.is_empty()).then_some(NetEvent::ObjectsKilled { handle, local_ids: kept })
+        }
+        event => Some(event),
     }
 }
 

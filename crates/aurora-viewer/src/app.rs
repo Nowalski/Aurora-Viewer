@@ -9693,6 +9693,15 @@ impl App {
         }
         self.sync_chat_log();
         while !still && let Ok((sent, ev)) = self.net.events.try_recv() {
+            // the shared instance's objects are not the simulator's
+            let ev = if self.instance.is_some() {
+                match crate::instance::screen(ev) {
+                    Some(ev) => ev,
+                    None => continue,
+                }
+            } else {
+                ev
+            };
             // (`sent`: when the session read the datagram, the time its
             // motion starts from)
             if let Some(app_ev) = self.bridge_runtime.receive(&mut self.world, ev, Instant::now(), sent) {
@@ -10155,6 +10164,10 @@ impl App {
             }
             // the walk to a double-clicked point (src/autopilot.rs)
             c.control_flags = self.autopilot_controls(c.control_flags);
+            // visiting a shared place: its floors and walls hold us
+            if let Some(instance) = &mut self.instance {
+                c.control_flags = instance.steer(&self.world, c.control_flags, Instant::now());
+            }
             if let Some(flags) = self.vr_follow_flags {
                 let linear = control::AT_POS
                     | control::AT_NEG

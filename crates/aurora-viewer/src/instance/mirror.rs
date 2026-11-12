@@ -133,6 +133,7 @@ impl Mirror {
         let mut local_ids: Vec<u32> = self.peers.values().flat_map(Peer::all_local_ids).collect();
         self.peers.clear();
         local_ids.extend(self.things.drain().flat_map(|(_, l)| l));
+        local_ids.sort_unstable();
         self.thing_ids.clear();
         self.thing_msgs.clear();
         self.land_rows.clear();
@@ -162,6 +163,14 @@ impl Mirror {
             events.extend(self.thing(thing, handle));
         }
         events
+    }
+
+    /// The boxes of the host's place, as we see it (for `ground::steer`).
+    pub fn place_bounds(&self) -> Vec<super::ground::Bounds> {
+        self.thing_msgs
+            .values()
+            .flat_map(|t| super::ground::linkset_bounds(t, self.offset_z))
+            .collect()
     }
 
     /// The height added to the host's place.
