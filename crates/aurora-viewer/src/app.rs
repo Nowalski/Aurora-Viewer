@@ -406,6 +406,11 @@ pub struct App {
     window_icon: Option<winit::window::Icon>,
     world: World,
     bridge_runtime: crate::world::bridge::Bridge,
+    /// Shared instance (experimental): what the environment asked for, until
+    /// the region is known, then the running instance.
+    instance_request: Option<crate::instance::Request>,
+    instance: Option<crate::instance::Instance>,
+    instance_env_read: bool,
     native_anchor: crate::movement::movelock::Controller,
     anchor_stands: crate::ao::anchor::StandCheck,
     /// Keep the verified standing set through an asynchronous stand-up reply.
@@ -1572,6 +1577,9 @@ impl App {
                 w
             },
             bridge_runtime: Default::default(),
+            instance_request: None,
+            instance: None,
+            instance_env_read: false,
             native_anchor: Default::default(),
             anchor_stands: Default::default(),
             anchor_pose: None,
@@ -2045,6 +2053,30 @@ impl App {
         }
     }
 
+    /// Shared instance (experimental): start it once the agent's region is
+    /// known, then exchange our state and apply the peers' each frame.
+    fn instance_step(&mut self) {
+        if !self.instance_env_read {
+            self.instance_env_read = true;
+            self.instance_request = crate::instance::Request::from_env(self.demo);
+        }
+        if self.world.main().is_none() {
+            return;
+        }
+        let now = Instant::now();
+        if let Some(request) = self.instance_request.take() {
+            let (instance, notice) = crate::instance::Instance::start(request, &self.world, self.demo, now);
+            self.instance = instance;
+            self.world.apply(notice);
+        }
+        let Some(instance) = &mut self.instance else {
+            return;
+        };
+        for event in instance.tick(&self.world, now) {
+            self.world.apply(event);
+        }
+    }
+
     fn send(&mut self, cmd: NetCommand) {
         self.send_from(cmd, uuid::Uuid::nil());
     }
@@ -2112,6 +2144,17 @@ impl App {
             }
         }
         self.world.rlva_filter_lure(&mut cmd);
+        if let (
+            Some(instance),
+            NetCommand::Chat {
+                message,
+                channel: 0,
+                chat_type,
+            },
+        ) = (&self.instance, &cmd)
+        {
+            instance.local_chat(message, *chat_type);
+        }
         let cmd = if let NetCommand::Chat {
             message,
             channel,
@@ -9509,6 +9552,7 @@ impl App {
             }
         }
         self.net_profile.events_left(self.net.events.len());
+        self.instance_step();
         let corrections = self.world.agent.take_corrections();
         if corrections.count > 0 {
             aurora_net::transition::step(|| format!("position of our avatar corrected by {:.2} m", corrections.largest));

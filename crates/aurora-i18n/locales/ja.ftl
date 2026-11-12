@@ -14052,3 +14052,13 @@ joystick-layout-positional = 位置に基づく
 
 joystick-layout-auto = 自動
 joystick-layout-xinput = XInput
+
+# Shared instance (proof of concept: two viewers on one PC)
+instance-peer-joined = { $name }さんが共有インスタンスに参加しました。
+instance-peer-left = { $name }さんが共有インスタンスから退出しました。
+instance-hosting = ポート{ $port }で共有インスタンスをホストしています。
+instance-joined = { $address }の共有インスタンスに参加しました。
+instance-failed = 共有インスタンスを開始できませんでした：{ $error }
+instance-connection-lost = 共有インスタンスが終了しました。
+demo-instance-peer-chat-hello = こんにちは！共有インスタンス経由で来ています。
+demo-instance-peer-chat-place = ここからだと、この場所はとても素敵ですね。

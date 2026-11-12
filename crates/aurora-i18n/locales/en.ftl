@@ -14116,3 +14116,13 @@ joystick-layout-positional = Positional
 
 joystick-layout-auto = Automatic
 joystick-layout-xinput = XInput
+
+# Shared instance (proof of concept: two viewers on one PC)
+instance-peer-joined = { $name } joined the shared instance.
+instance-peer-left = { $name } left the shared instance.
+instance-hosting = Hosting a shared instance on port { $port }.
+instance-joined = Joined the shared instance at { $address }.
+instance-failed = The shared instance could not start: { $error }
+instance-connection-lost = The shared instance closed.
+demo-instance-peer-chat-hello = Hi! I'm here through a shared instance.
+demo-instance-peer-chat-place = This place looks great from here.

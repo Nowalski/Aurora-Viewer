@@ -51,6 +51,7 @@ mod high_contrast;
 mod hover_tips;
 mod ik_edit;
 mod imports;
+mod instance;
 mod instances;
 mod interaction;
 mod interface_colors;

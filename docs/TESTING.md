@@ -162,6 +162,10 @@ Actual grid login and teleporting are performed by the human.
 | `AURORA_DEMO_TEXTURE_RES=1` | Boards with 2048 px streamed textures, tinted by the resolution shown |
 | `AURORA_TEST_NEUTRAL_POSE=1` | Local neutral-pose comparison in the online or demo Hover Height floater |
 | `AURORA_LOG_NAME=<name>` | Name of the log file |
+| `AURORA_INSTANCE_HOST=<port>` | Hosts a shared instance on this TCP port (experimental) |
+| `AURORA_INSTANCE_JOIN=<host:port>` | Joins a shared instance hosted by another window |
+| `AURORA_INSTANCE_BIND=<address>` | Listen address of the host, `127.0.0.1` by default; `0.0.0.0` accepts other PCs on the LAN |
+| `AURORA_INSTANCE_NAME=<name>` | Name shown to the other windows; the agent's name, or `Guest xxxx` in demo |
 | `AURORA_EMOJI_FONT=<path>` | Uses another emoji font than the built-in one (PNG bitmaps: CBDT or sbix) |
 | `AURORA_MAX_AVATARS`, `AURORA_MAX_COMPLEXITY`, `AURORA_AA`, `AURORA_SHADOWS`, `AURORA_PROJECTOR_SHADOWS` | Override these settings |
 | `AURORA_PROJECTOR_SHADOW_LIMIT=1..16` | Override the projector shadow budget (default 2) |
@@ -173,6 +177,18 @@ with one nearby Always entry and two distant Never / Always entries.
 Check live silhouette changes, filtering, Ctrl/Shift selection, changing full
 detail, removing exceptions and adding residents from the shared picker.
 `empty` starts with no exceptions. Both scenarios use only demo settings.
+
+`AURORA_INSTANCE_HOST` and `AURORA_INSTANCE_JOIN` are an experimental shared
+instance, tested on one PC with two demo windows (`AURORA_DEMO=1`, each with
+its own `--title`): the first hosts with `AURORA_INSTANCE_HOST=7777`, the
+second joins with `AURORA_INSTANCE_JOIN=127.0.0.1:7777`. Each window sends its
+own avatar's position, rotation, velocity, animations and appearance (the
+appearance on change and every 5 s, the rest up to 10 times a second), and its
+nearby chat. Look for the other avatar walking and animating in each window,
+wearing the same look, its chat in nearby chat, and the "joined" and "left"
+notices when a window starts or stops. Only ids and small state cross the
+connection: no asset bytes. `AURORA_DEMO_INSTANCE=peer` simulates such a peer
+walking and dancing near the agent, with no network, for screenshots.
 
 **Saved graphics profiles (#1218).** `AURORA_DEMO_BARS=profiles` installs three
 demo profiles, including two with identical quality; add `AURORA_DEMO_OPTIONS=graphics` to inspect
@@ -3520,6 +3536,7 @@ To check with these scenarios:
 | `AURORA_DEMO_SEAT_KILL=1` | A seat deleted under the resident sitting on it |
 | `AURORA_DEMO_DISPLAYNAME="<name>"` | Display name change (simulated) |
 | `AURORA_DEMO_DISPLAYNAME_ERROR=<error_tag>` | Server error on the name change |
+| `AURORA_DEMO_INSTANCE=peer` | A simulated shared-instance peer walking and dancing near the agent, no network (see General) |
 
 ### Details
 
