@@ -195,9 +195,11 @@ also shares every other avatar of its region: start the host with
 `AURORA_DEMO_CROWD=20` (and the guest without it), and the guest sees the
 host's 20 extra residents, with their looks, where the host sees them; a
 resident the guest's own region already shows is not doubled. Their
-attachments (no HUDs) and body textures come along. While hosting, a friend's
-menu in People has "Invite to my shared place": an IM whose bucket carries the
-invitation. To see the other side, start the second window with
+attachments (no HUDs) and body textures come along. Any window can host from World ›
+Share my place (any free port, or the one of `AURORA_INSTANCE_HOST`). While
+hosting, a friend's menu in People has "Invite to my shared place": an IM
+whose last line carries the invitation (the simulator drops a plain IM's
+binary bucket). To see the other side, start the second window with
 `AURORA_DEMO_INSTANCE_INVITE=127.0.0.1:7777` instead of `AURORA_INSTANCE_JOIN`:
 an invitation card comes from a demo friend, and Teleport joins the instance,
 then teleports next to the host with the usual teleport screen.

@@ -4625,9 +4625,13 @@ impl World {
         };
         // a friend's invitation into a shared instance (experimental)
         if im.dialog == 0
-            && let Some(invitation) = crate::instance::invite::Invitation::from_bucket(&im.binary_bucket)
+            && let Some((invitation, text)) = crate::instance::invite::Invitation::from_message(&im.message)
         {
-            self.on_instance_invite(im, &from, invitation);
+            let im = InstantMessage {
+                message: text,
+                ..im.clone()
+            };
+            self.on_instance_invite(&im, &from, invitation);
             return true;
         }
         let before = self.notifications.last_id();

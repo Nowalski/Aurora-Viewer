@@ -2112,6 +2112,29 @@ impl App {
         }
     }
 
+    /// World › Share my place: anyone hosts from the menu, on the port of
+    /// AURORA_INSTANCE_HOST or any free one (the invitations carry it).
+    /// Hosting leaves an instance we were a guest in; stopping ends ours.
+    fn toggle_instance_hosting(&mut self) {
+        let hosting = crate::instance::hosting();
+        if let Some(mut old) = self.instance.take() {
+            for event in old.leave(&self.world) {
+                self.world.apply(event);
+            }
+        }
+        if hosting {
+            let notice = crate::instance::notice(aurora_i18n::tr!("instance-share-stopped").to_string());
+            self.world.apply(notice);
+            return;
+        }
+        let port = std::env::var("AURORA_INSTANCE_HOST")
+            .ok()
+            .and_then(|p| p.trim().parse().ok())
+            .unwrap_or(0);
+        let bind = std::env::var("AURORA_INSTANCE_BIND").unwrap_or_else(|_| "127.0.0.1".into());
+        self.instance_request = Some(crate::instance::Request::Host { bind, port });
+    }
+
     /// Invite a friend into the instance we host (experimental): an
     /// ordinary IM whose bucket holds the invitation.
     fn invite_to_instance(&mut self, to: uuid::Uuid) {
@@ -2126,8 +2149,8 @@ impl App {
             to,
             dialog: 0,
             id: session,
-            message: aurora_i18n::tr!("instance-invite-message").into(),
-            bucket: invitation.to_bucket(),
+            message: invitation.to_message(aurora_i18n::tr!("instance-invite-message")),
+            bucket: Vec::new(),
         });
         let name = self.world.social.name_of(&to);
         let notice = crate::instance::notice(aurora_i18n::tr!("instance-invite-sent", name = name.as_str()).to_string());
@@ -14592,6 +14615,7 @@ impl App {
             BarAction::Portals => {
                 ui::widgets::open_floater(&self.egui_ctx, "portals", &mut self.portal_ui.open);
             }
+            BarAction::ShareInstance => self.toggle_instance_hosting(),
             BarAction::Build(t) => {
                 match t {
                     1 => self.build.open_build(crate::build::Tool::Edit),
