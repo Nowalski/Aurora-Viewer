@@ -13,7 +13,7 @@ use super::wire::Worn;
 /// What a step climbs (as an avatar walks up a stair).
 const STEP: f32 = 0.5;
 /// Half the height of an avatar, centre to feet.
-const HALF_HEIGHT: f32 = 0.95;
+pub(super) const HALF_HEIGHT: f32 = 0.95;
 /// How far ahead a wall stops us.
 const REACH: f32 = 0.45;
 /// Closer than this to the floor, no correction.

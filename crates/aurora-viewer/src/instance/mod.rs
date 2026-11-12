@@ -36,9 +36,12 @@ pub fn hosting() -> bool {
     HOSTING.load(Ordering::Relaxed)
 }
 
-/// How long after the move to the meeting point our height is read: the
-/// local teleport and the landing are over by then.
-const ARRIVAL_SETTLE: Duration = Duration::from_secs(4);
+/// How long after the move to the meeting point the place starts holding
+/// us (the local teleport is over by then).
+const ARRIVAL_SETTLE: Duration = Duration::from_millis(1500);
+/// How far above where we will stand the move puts us, so we land rather
+/// than sink into anything.
+const ARRIVAL_ABOVE: f32 = 0.5;
 
 /// A visit's meeting point: where the host stood when it invited us (or,
 /// through a portal, where it stands when its place comes in). We move
@@ -46,7 +49,7 @@ const ARRIVAL_SETTLE: Duration = Duration::from_secs(4);
 /// so its ground meets ours there.
 enum Arrival {
     Waiting,
-    Moving { target: Vec3, since: Instant },
+    Moving { since: Instant },
     Done,
 }
 
@@ -358,23 +361,27 @@ impl Instance {
                     .main()
                     .map_or((256.0, 256.0), |r| (r.heightmap.size_x as f32, r.heightmap.size_y as f32));
                 let (x, y) = (at.x.clamp(0.5, w - 0.5), at.y.clamp(0.5, h - 0.5));
-                // onto our own ground there, so we do not fall from the
-                // host's height (a skybox) for long
-                let ground = self.visit.as_ref().and_then(|v| v.own_ground(x, y)).unwrap_or(at.z);
-                let target = Vec3::new(x, y, ground + 1.0);
-                log::info!("shared instance: moving to the meeting point ({x:.0}, {y:.0})");
-                self.local_teleport = Some(target);
-                self.arrival = Arrival::Moving { target: at, since: now };
-                Vec::new()
-            }
-            Arrival::Moving { target, since } => {
-                if now.duration_since(since) < ARRIVAL_SETTLE || world.teleporting {
-                    return Vec::new();
-                }
-                self.arrival = Arrival::Done;
-                let dz = world.agent.position.z - target.z;
-                log::info!("shared instance: the host's place is {dz:.1} m higher here");
+                // we will stand on our own ground there (not at the host's
+                // height, a skybox): the host's place is raised or lowered
+                // at once so its ground is there too, and the move puts us
+                // a little above it, held there as soon as we arrive
+                let ground = self
+                    .visit
+                    .as_ref()
+                    .and_then(|v| v.own_ground(x, y))
+                    .unwrap_or(at.z - ground::HALF_HEIGHT);
+                let stand = ground + ground::HALF_HEIGHT;
+                let dz = stand - at.z;
+                log::info!("shared instance: meeting at ({x:.0}, {y:.0}), the host's place {dz:.1} m higher here");
+                self.local_teleport = Some(Vec3::new(x, y, stand + ARRIVAL_ABOVE));
+                self.arrival = Arrival::Moving { since: now };
                 self.mirror.set_offset_z(dz, handle)
+            }
+            Arrival::Moving { since } => {
+                if now.duration_since(since) >= ARRIVAL_SETTLE && !world.teleporting {
+                    self.arrival = Arrival::Done;
+                }
+                Vec::new()
             }
             Arrival::Done => Vec::new(),
         }
