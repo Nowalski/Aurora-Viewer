@@ -1,4 +1,5 @@
 //! Integration tests of the hub and the guest client over real loopback TCP.
+//! A guest counts, and hears the others, once it has said Hello.
 //! Each test starts its own hub on a free port and only uses the public API.
 
 use std::io::{ErrorKind, Read, Write};
@@ -117,9 +118,9 @@ fn chat_reaches_the_other_guests_and_the_host_but_is_not_echoed() {
     let (a_id, b_id) = (Uuid::new_v4(), Uuid::new_v4());
     let a = Client::connect(&addr(&hub)).expect("connect guest A");
     let b = Client::connect(&addr(&hub)).expect("connect guest B");
-    wait_for(|| (hub.guests() == 2).then_some(()));
     a.send(hello(a_id, "A"));
     b.send(hello(b_id, "B"));
+    wait_for(|| (hub.guests() == 2).then_some(()));
 
     let chat_b = chat(b_id, "hello from b");
     let chat_a = chat(a_id, "hello from a");
@@ -146,6 +147,11 @@ fn late_guest_receives_the_host_hello_and_state_first() {
     hub.send(state.clone());
 
     let late = Client::connect(&addr(&hub)).expect("connect the late guest");
+    // the hub answers a guest's Hello with what it already knows
+    late.send(Msg::Hello {
+        id: Uuid::new_v4(),
+        name: "Late".into(),
+    });
     assert_eq!(wait_for(|| late.try_recv()), hello);
     assert_eq!(wait_for(|| late.try_recv()), state);
 }
@@ -156,9 +162,9 @@ fn guest_cannot_speak_for_another_id() {
     let (x_id, y_id, b_id) = (Uuid::new_v4(), Uuid::new_v4(), Uuid::new_v4());
     let a = Client::connect(&addr(&hub)).expect("connect guest A");
     let b = Client::connect(&addr(&hub)).expect("connect guest B");
-    wait_for(|| (hub.guests() == 2).then_some(()));
     a.send(hello(x_id, "A"));
     b.send(hello(b_id, "B"));
+    wait_for(|| (hub.guests() == 2).then_some(()));
 
     // Spoofed chat, then a real one from the same connection: the spoof would
     // be queued ahead of the real chat if it had been relayed.
@@ -178,9 +184,9 @@ fn dropped_guest_is_announced_with_bye() {
     let x_id = Uuid::new_v4();
     let a = Client::connect(&addr(&hub)).expect("connect guest A");
     let b = Client::connect(&addr(&hub)).expect("connect guest B");
-    wait_for(|| (hub.guests() == 2).then_some(()));
     a.send(hello(x_id, "A"));
     b.send(hello(Uuid::new_v4(), "B"));
+    wait_for(|| (hub.guests() == 2).then_some(()));
     await_msg(|| hub.try_recv(), &hello(x_id, "A"));
     await_msg(|| b.try_recv(), &hello(x_id, "A"));
 
