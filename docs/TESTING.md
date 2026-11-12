@@ -168,6 +168,7 @@ Actual grid login and teleporting are performed by the human.
 | `AURORA_INSTANCE_NAME=<name>` | Name shown to the other windows; the agent's name, or `Guest xxxx` in demo |
 | `AURORA_INSTANCE_ADVERTISE=<host:port>` | Address the host's invitations give, when friends reach it elsewhere than where it listens |
 | `AURORA_DEMO_INSTANCE_INVITE=<host:port>` | The demo's first friend invites this window into that instance, 4 s in |
+| `AURORA_DEMO_INSTANCE_PORTAL=<host:port>` | A demo friend opens a portal into that instance four metres ahead, 4 s in |
 | `AURORA_EMOJI_FONT=<path>` | Uses another emoji font than the built-in one (PNG bitmaps: CBDT or sbix) |
 | `AURORA_MAX_AVATARS`, `AURORA_MAX_COMPLEXITY`, `AURORA_AA`, `AURORA_SHADOWS`, `AURORA_PROJECTOR_SHADOWS` | Override these settings |
 | `AURORA_PROJECTOR_SHADOW_LIMIT=1..16` | Override the projector shadow budget (default 2) |
@@ -201,8 +202,20 @@ hosting, a friend's menu in People has "Invite to my shared place": an IM
 whose last line carries the invitation (the simulator drops a plain IM's
 binary bucket). To see the other side, start the second window with
 `AURORA_DEMO_INSTANCE_INVITE=127.0.0.1:7777` instead of `AURORA_INSTANCE_JOIN`:
-an invitation card comes from a demo friend, and Teleport joins the instance,
-then teleports next to the host with the usual teleport screen.
+an invitation card comes from a demo friend, and Visit joins the instance
+with no teleport. A guest whose region is not the host's visits the host's
+place: the host streams its region's linksets (ids and shapes, as `Thing`
+lines) and its land, and the guest's own objects and people are hidden like a
+temporary derender ("Hidden while visiting a shared place" in the Asset
+blacklist), then shown again, with its own land, when it leaves or the link
+drops. The guest stays where it is in SL: only what it sees changes. In the
+demo both windows stand in the same plaza, so run the host with a few
+`AURORA_DEMO_CROWD` residents and rez or move something there, and look for it
+on the guest. While hosting, World › Portal to my shared place opens a
+friends-only Aurora portal four metres ahead whose details carry the
+instance's address: a friend who walks through visits the instance the same
+way, with no teleport. To see that side, start the second window with
+`AURORA_DEMO_INSTANCE_PORTAL=127.0.0.1:7777` and walk through the portal ahead.
 
 **Saved graphics profiles (#1218).** `AURORA_DEMO_BARS=profiles` installs three
 demo profiles, including two with identical quality; add `AURORA_DEMO_OPTIONS=graphics` to inspect

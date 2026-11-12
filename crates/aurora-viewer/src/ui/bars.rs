@@ -47,6 +47,8 @@ pub enum BarAction {
     Portals,
     /// Start or stop sharing our place as a shared instance (experimental).
     ShareInstance,
+    /// A friends-only portal into the instance we host.
+    InstancePortal,
     CheckUpdates,
     ReportBug,
     /// The bug button's right click: the viewer's version to the clipboard,
@@ -1059,6 +1061,9 @@ fn main_menus(ui: &mut egui::Ui, p: &Palette, panels: &mut Panels, st: &StatusIn
         };
         if menu::item(ui, p, "users-group", share) {
             *action = BarAction::ShareInstance;
+        }
+        if crate::instance::hosting() && menu::item(ui, p, "door-enter", aurora_i18n::tr!("instance-portal-open")) {
+            *action = BarAction::InstancePortal;
         }
         let history = crate::keybinds::chord_label("KeyH", false, true, false);
         if menu::item_keys(ui, p, "history", aurora_i18n::tr!("common-teleport-history"), &history) {

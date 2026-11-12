@@ -13,6 +13,7 @@ pub mod demo_peer;
 pub mod hub;
 pub mod invite;
 pub mod mirror;
+pub mod place;
 #[cfg(test)]
 mod tests;
 pub mod wire;
@@ -34,21 +35,10 @@ pub fn hosting() -> bool {
     HOSTING.load(Ordering::Relaxed)
 }
 
-/// How long the teleport of an accepted invitation waits for the host's
-/// own position before going to the one the invitation gave.
-const ARRIVAL_WAIT: Duration = Duration::from_secs(8);
-
-/// Where we go once in the instance of an accepted invitation.
-pub struct Arrival {
-    pub host: Uuid,
-    pub region: String,
-    pub fallback: Vec3,
-}
-
 /// How this viewer takes part.
 enum Link {
-    /// Hosting: the hub, and the people of our place it shares.
-    Host(hub::Hub, crowd::Crowd),
+    /// Hosting: the hub, the people of our place and the place itself.
+    Host(hub::Hub, crowd::Crowd, place::PlaceSender),
     Guest(client::Client),
     /// AURORA_DEMO_INSTANCE=peer: a simulated peer, nothing on the network.
     Demo(Option<demo_peer::DemoPeer>),
@@ -56,12 +46,8 @@ enum Link {
 
 /// What the environment asks for, read once at startup.
 pub enum Request {
-    Host {
-        bind: String,
-        port: u16,
-    },
-    /// With an arrival when it comes from an accepted invitation.
-    Join(String, Option<Arrival>),
+    Host { bind: String, port: u16 },
+    Join(String),
     DemoPeer,
 }
 
@@ -78,7 +64,7 @@ impl Request {
             };
         }
         if let Ok(address) = std::env::var("AURORA_INSTANCE_JOIN") {
-            return Some(Request::Join(address.trim().to_string(), None));
+            return Some(Request::Join(address.trim().to_string()));
         }
         (demo && std::env::var("AURORA_DEMO_INSTANCE").is_ok_and(|v| v == "peer")).then_some(Request::DemoPeer)
     }
@@ -97,10 +83,17 @@ pub struct Instance {
     started: Instant,
     /// The address our invitations give (hosting only).
     advertised: Option<String>,
-    /// An accepted invitation's arrival, until we know where to go.
-    arrival: Option<Arrival>,
-    /// The teleport the app is to make (region, position).
-    teleport: Option<(String, Vec3)>,
+    /// The host's address, as a guest.
+    joined: Option<String>,
+    /// Peers our own region shows already: never hidden by a visit, as the
+    /// instance leaves them to the region.
+    region_shows: std::collections::HashSet<Uuid>,
+    /// A guest seeing the host's place instead of its own.
+    visit: Option<place::Visit>,
+    /// What the app is to hide of our place (id, is an avatar), and to show
+    /// again, while and after we visit.
+    hide: Vec<(Uuid, bool)>,
+    show: Vec<Uuid>,
 }
 
 impl Instance {
@@ -124,7 +117,7 @@ impl Instance {
             name: name.clone(),
         };
         let mut advertised = None;
-        let mut arrival = None;
+        let mut joined = None;
         let (link, text) = match request {
             Request::Host { bind, port } => match hub::Hub::start(&bind, port) {
                 Ok(hub) => {
@@ -142,7 +135,7 @@ impl Instance {
                     let port = hub.port().to_string();
                     hub.send(hello);
                     (
-                        Link::Host(hub, crowd::Crowd::new()),
+                        Link::Host(hub, crowd::Crowd::new(), place::PlaceSender::default()),
                         aurora_i18n::tr!("instance-hosting", port = port.as_str()),
                     )
                 }
@@ -154,10 +147,10 @@ impl Instance {
                     );
                 }
             },
-            Request::Join(address, wanted) => match client::Client::connect(&address) {
+            Request::Join(address) => match client::Client::connect(&address) {
                 Ok(client) => {
-                    arrival = wanted;
                     client.send(hello);
+                    joined = Some(address.clone());
                     (Link::Guest(client), aurora_i18n::tr!("instance-joined", address = address.as_str()))
                 }
                 Err(e) => {
@@ -180,8 +173,11 @@ impl Instance {
             lost_reported: false,
             started: now,
             advertised,
-            arrival,
-            teleport: None,
+            joined,
+            region_shows: Default::default(),
+            visit: None,
+            hide: Vec::new(),
+            show: Vec::new(),
         };
         (Some(instance), notice(text))
     }
@@ -200,7 +196,7 @@ impl Instance {
         };
         let mut incoming = Vec::new();
         match &mut self.link {
-            Link::Host(hub, crowd) => {
+            Link::Host(hub, crowd, place) => {
                 if let Some(state) = state {
                     hub.send(wire::Msg::State(state));
                 }
@@ -209,6 +205,9 @@ impl Instance {
                 }
                 let mirror = &self.mirror;
                 for msg in crowd.messages(world, |id| mirror.contains(id), now) {
+                    hub.send(msg);
+                }
+                for msg in place.messages(world, self.peer_id, now) {
                     hub.send(msg);
                 }
                 while let Some(msg) = hub.try_recv() {
@@ -245,54 +244,89 @@ impl Instance {
         // Someone the region already shows us (we are in the host's place
         // ourselves) stays the region's: the instance only adds who is missing.
         let native = |id: &Uuid| !self.mirror.contains(id) && world.objects.index_of_uuid(id).is_some();
-        let incoming: Vec<_> = incoming
-            .into_iter()
-            .filter(|m| m.id() != self.peer_id && !native(&m.id()))
-            .collect();
+        let mut incoming_kept = Vec::with_capacity(incoming.len());
+        for m in incoming {
+            let id = m.id();
+            if id == self.peer_id {
+                continue;
+            }
+            match &m {
+                wire::Msg::Bye { .. } => {
+                    self.region_shows.remove(&id);
+                }
+                wire::Msg::Hello { .. } | wire::Msg::Present { .. } if native(&id) => {
+                    self.region_shows.insert(id);
+                }
+                _ => {}
+            }
+            if !native(&id) {
+                incoming_kept.push(m);
+            }
+        }
+        let incoming = incoming_kept;
+        // The host's place arrives: we visit it (only a guest gets it, and
+        // only when the host is not in our own region, as then the region
+        // shows it already and its messages were left out above).
+        if self.visit.is_none()
+            && let Some(host) = incoming.iter().find_map(|m| match m {
+                wire::Msg::Thing(w) => Some(w.id),
+                wire::Msg::Terrain { id, .. } => Some(*id),
+                _ => None,
+            })
+        {
+            self.visit = Some(place::Visit::start(world, host));
+        }
         for msg in &incoming {
             events.extend(self.mirror.apply(msg, handle));
         }
-        self.arrive(&incoming, now);
+        // we came into the host's region in SL: the region shows its place
+        if self
+            .visit
+            .as_ref()
+            .is_some_and(|v| !self.mirror.contains(&v.host) && world.objects.index_of_uuid(&v.host).is_some())
+        {
+            events.extend(self.end_visit(handle));
+        }
+        if let Some(visit) = &mut self.visit {
+            let mirror = &self.mirror;
+            let region_shows = &self.region_shows;
+            self.hide
+                .extend(visit.to_hide(world, |id| mirror.contains(id) || region_shows.contains(id), now));
+        }
         if let Link::Guest(client) = &self.link
             && !client.connected()
             && !self.lost_reported
         {
             self.lost_reported = true;
             log::info!("shared instance: the host closed the link");
+            events.extend(self.end_visit(handle));
             events.extend(self.mirror.clear(handle));
             events.push(notice(aurora_i18n::tr!("instance-connection-lost").to_string()));
         }
         events
     }
 
-    /// An accepted invitation: once the host's position comes in (or after
-    /// a while, the invitation's), the teleport to stand beside it.
-    fn arrive(&mut self, incoming: &[wire::Msg], now: Instant) {
-        let Some(arrival) = &mut self.arrival else {
-            return;
+    /// Stop visiting: the host's place goes, ours comes back.
+    fn end_visit(&mut self, handle: aurora_net::RegionHandle) -> Vec<NetEvent> {
+        let Some(visit) = self.visit.take() else {
+            return Vec::new();
         };
-        for msg in incoming {
-            match msg {
-                // no host id in the invitation: the first Aurora peer is it
-                wire::Msg::Hello { id, .. } if arrival.host.is_nil() => arrival.host = *id,
-                wire::Msg::State(s) if s.id == arrival.host => {
-                    let beside = Vec3::from_array(s.pos) + Vec3::new(1.5, 0.0, 0.0);
-                    self.teleport = Some((arrival.region.clone(), beside));
-                    self.arrival = None;
-                    return;
-                }
-                _ => {}
-            }
-        }
-        if now.duration_since(self.started) > ARRIVAL_WAIT {
-            self.teleport = Some((arrival.region.clone(), arrival.fallback));
-            self.arrival = None;
-        }
+        let (show, land) = visit.end(handle);
+        self.show.extend(show);
+        let mut events = self.mirror.clear_place(handle);
+        events.extend(land);
+        events
     }
 
-    /// The teleport an accepted invitation asks for, once.
-    pub fn take_teleport(&mut self) -> Option<(String, Vec3)> {
-        self.teleport.take()
+    /// What of our place the app hides now (id, is an avatar), and what it
+    /// shows again.
+    pub fn take_visibility(&mut self) -> (Vec<(Uuid, bool)>, Vec<Uuid>) {
+        (std::mem::take(&mut self.hide), std::mem::take(&mut self.show))
+    }
+
+    /// The host's address, when we are its guest.
+    pub fn joined(&self) -> Option<&str> {
+        self.joined.as_deref()
     }
 
     /// An invitation into the instance we host, for a friend. `None` when we
@@ -307,9 +341,15 @@ impl Instance {
         })
     }
 
-    /// Leave the instance: the peers' avatars go from the world.
+    /// Leave the instance: the peers' avatars and the host's place go from
+    /// the world, our own place comes back (`take_visibility` after this).
     pub fn leave(&mut self, world: &World) -> Vec<NetEvent> {
-        world.main().map(|r| self.mirror.clear(r.handle)).unwrap_or_default()
+        let Some(handle) = world.main().map(|r| r.handle) else {
+            return Vec::new();
+        };
+        let mut events = self.end_visit(handle);
+        events.extend(self.mirror.clear(handle));
+        events
     }
 
     /// Our nearby chat goes to the peers too (channel 0 only: commands to
@@ -331,7 +371,7 @@ impl Instance {
             chat_type,
         };
         match &self.link {
-            Link::Host(hub, _) => hub.send(msg),
+            Link::Host(hub, ..) => hub.send(msg),
             Link::Guest(client) => client.send(msg),
             Link::Demo(_) => {}
         }
@@ -345,7 +385,7 @@ impl Drop for Instance {
         }
         let bye = wire::Msg::Bye { id: self.peer_id };
         match &self.link {
-            Link::Host(hub, _) => hub.send(bye),
+            Link::Host(hub, ..) => hub.send(bye),
             Link::Guest(client) => client.send(bye),
             Link::Demo(_) => {}
         }

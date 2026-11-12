@@ -17,7 +17,7 @@ use uuid::Uuid;
 
 /// Local ids of the mirrored avatars: far from the ids the simulator hands
 /// out, so they never collide with the region's objects.
-const FIRST_LOCAL_ID: u32 = 0xA15A_0001;
+pub(super) const FIRST_LOCAL_ID: u32 = 0xA15A_0001;
 
 /// Same size as the avatar of the demo (`demo::action_avatar`).
 const AVATAR_SCALE: Vec3 = Vec3::new(0.45, 0.6, 1.9);
@@ -25,6 +25,10 @@ const AVATAR_SCALE: Vec3 = Vec3::new(0.45, 0.6, 1.9);
 pub struct Mirror {
     peers: HashMap<Uuid, Peer>,
     next_local_id: u32,
+    /// The host's place while we visit it: our local id and full id for
+    /// each of its prims (by its key), and the local ids of each linkset.
+    thing_ids: HashMap<u32, (u32, Uuid)>,
+    things: HashMap<u32, Vec<u32>>,
 }
 
 struct Peer {
@@ -72,6 +76,8 @@ impl Mirror {
         Self {
             peers: HashMap::new(),
             next_local_id: FIRST_LOCAL_ID,
+            thing_ids: HashMap::new(),
+            things: HashMap::new(),
         }
     }
 
@@ -86,13 +92,29 @@ impl Mirror {
             Msg::Bye { id } => self.bye(*id, handle),
             Msg::Worn(worn) => self.worn(worn, handle),
             Msg::Unworn { id, root } => self.unworn(*id, *root, handle),
+            Msg::Thing(thing) => self.thing(thing, handle),
+            Msg::Gone { root, .. } => self.gone(*root, handle),
+            Msg::Terrain { row, size_x, heights, .. } => super::place::terrain_event(handle, *row, *size_x, heights).into_iter().collect(),
+        }
+    }
+
+    /// Removes the host's place (we stop visiting it).
+    pub fn clear_place(&mut self, handle: RegionHandle) -> Vec<NetEvent> {
+        let local_ids: Vec<u32> = self.things.drain().flat_map(|(_, l)| l).collect();
+        self.thing_ids.clear();
+        if local_ids.is_empty() {
+            Vec::new()
+        } else {
+            vec![NetEvent::ObjectsKilled { handle, local_ids }]
         }
     }
 
     /// Removes every mirrored avatar (the instance ended or we left it).
     pub fn clear(&mut self, handle: RegionHandle) -> Vec<NetEvent> {
-        let local_ids: Vec<u32> = self.peers.values().flat_map(Peer::all_local_ids).collect();
+        let mut local_ids: Vec<u32> = self.peers.values().flat_map(Peer::all_local_ids).collect();
         self.peers.clear();
+        local_ids.extend(self.things.drain().flat_map(|(_, l)| l));
+        self.thing_ids.clear();
         if local_ids.is_empty() {
             Vec::new()
         } else {
@@ -274,6 +296,54 @@ impl Mirror {
         }
         match peer.worn_local.remove(&root) {
             Some(local_ids) if !local_ids.is_empty() => vec![NetEvent::ObjectsKilled { handle, local_ids }],
+            _ => Vec::new(),
+        }
+    }
+}
+
+impl Mirror {
+    /// A linkset of the host's place, standing in the region (the root's
+    /// parent is none). It carries no rights here: the host owns nothing
+    /// we could edit, copy or take, as for any object of someone else.
+    fn thing(&mut self, thing: &Worn, handle: RegionHandle) -> Vec<NetEvent> {
+        let mut objects = Vec::with_capacity(thing.prims.len());
+        let mut locals = Vec::with_capacity(thing.prims.len());
+        let mut root_local = None;
+        for p in &thing.prims {
+            let next = &mut self.next_local_id;
+            let (local_id, full_id) = *self.thing_ids.entry(p.key).or_insert_with(|| {
+                let local = *next;
+                *next = next.wrapping_add(1);
+                (local, Uuid::new_v4())
+            });
+            match prim_update(p, local_id, full_id, root_local.unwrap_or(0), thing.id) {
+                Some(update) => {
+                    objects.push(update);
+                    locals.push(local_id);
+                    root_local.get_or_insert(local_id);
+                }
+                None if root_local.is_none() => break,
+                None => {}
+            }
+        }
+        let before = self.things.insert(thing.root, locals.clone()).unwrap_or_default();
+        let gone: Vec<u32> = before.into_iter().filter(|l| !locals.contains(l)).collect();
+        let mut events = Vec::with_capacity(2);
+        if !gone.is_empty() {
+            events.push(NetEvent::ObjectsKilled { handle, local_ids: gone });
+        }
+        if !objects.is_empty() {
+            events.push(NetEvent::ObjectUpdates { handle, objects });
+        }
+        events
+    }
+
+    fn gone(&mut self, root: u32, handle: RegionHandle) -> Vec<NetEvent> {
+        match self.things.remove(&root) {
+            Some(local_ids) if !local_ids.is_empty() => {
+                self.thing_ids.retain(|_, (l, _)| !local_ids.contains(l));
+                vec![NetEvent::ObjectsKilled { handle, local_ids }]
+            }
             _ => Vec::new(),
         }
     }
@@ -595,6 +665,43 @@ mod tests {
             })
             .sum();
         assert_eq!(killed, 3);
+    }
+
+    #[test]
+    fn the_hosts_place_stands_in_the_region_and_leaves_with_the_visit() {
+        let mut m = Mirror::new();
+        let host = peer_id(3);
+        // no Hello needed: the place is not a peer
+        let Msg::Worn(w) = worn(host, &[70, 71]) else {
+            panic!("a linkset");
+        };
+        let created = updates(&m.apply(&Msg::Thing(w), HANDLE));
+        assert_eq!(created.len(), 2);
+        let root = created[0].0;
+        assert_eq!(created[0].1, 0);
+        assert_eq!(created[1].1, root);
+        assert!(root >= FIRST_LOCAL_ID);
+        let Msg::Worn(w) = worn(host, &[80]) else {
+            panic!("a linkset");
+        };
+        m.apply(&Msg::Thing(w), HANDLE);
+        let gone = m.apply(&Msg::Gone { id: host, root: 70 }, HANDLE);
+        assert_eq!(
+            count(
+                &gone,
+                |e| matches!(e, NetEvent::ObjectsKilled { local_ids, .. } if local_ids.len() == 2)
+            ),
+            1
+        );
+        let cleared = m.clear_place(HANDLE);
+        assert_eq!(
+            count(
+                &cleared,
+                |e| matches!(e, NetEvent::ObjectsKilled { local_ids, .. } if local_ids.len() == 1)
+            ),
+            1
+        );
+        assert!(m.clear_place(HANDLE).is_empty());
     }
 
     #[test]

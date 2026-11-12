@@ -414,6 +414,7 @@ pub struct App {
     /// When the world first had its region, for the demo invitation.
     instance_since: Option<Instant>,
     instance_demo_invite_sent: bool,
+    instance_demo_portal_sent: bool,
     native_anchor: crate::movement::movelock::Controller,
     anchor_stands: crate::ao::anchor::StandCheck,
     /// Keep the verified standing set through an asynchronous stand-up reply.
@@ -1585,6 +1586,7 @@ impl App {
             instance_env_read: false,
             instance_since: None,
             instance_demo_invite_sent: false,
+            instance_demo_portal_sent: false,
             native_anchor: Default::default(),
             anchor_stands: Default::default(),
             anchor_pose: None,
@@ -2078,19 +2080,18 @@ impl App {
                 self.world.apply(event);
             }
         }
-        // an invitation accepted: leave the instance we are in, join that one
-        if let Some(invitation) = self.world.teleport_invites.take_instance_accepted() {
-            if let Some(mut old) = self.instance.take() {
-                for event in old.leave(&self.world) {
-                    self.world.apply(event);
-                }
+        // AURORA_DEMO_INSTANCE_PORTAL=<host:port>: a friend's portal into
+        // that instance, four metres ahead
+        if self.demo && !self.instance_demo_portal_sent && now.duration_since(since) > Duration::from_secs(4) {
+            self.instance_demo_portal_sent = true;
+            if let Ok(address) = std::env::var("AURORA_DEMO_INSTANCE_PORTAL") {
+                self.seed_instance_portal_demo(address.trim().to_owned());
             }
-            let arrival = crate::instance::Arrival {
-                host: invitation.host,
-                region: invitation.region,
-                fallback: glam::Vec3::from_array(invitation.pos),
-            };
-            self.instance_request = Some(crate::instance::Request::Join(invitation.address, Some(arrival)));
+        }
+        // an invitation accepted: leave the instance we are in, join that one
+        // (a visit: we stay where we are in SL, the host's place is shown)
+        if let Some(invitation) = self.world.teleport_invites.take_instance_accepted() {
+            self.join_instance(invitation.address);
         }
         if let Some(request) = self.instance_request.take() {
             let (instance, notice) = crate::instance::Instance::start(request, &self.world, self.demo, now);
@@ -2103,12 +2104,79 @@ impl App {
         for event in instance.tick(&self.world, now) {
             self.world.apply(event);
         }
-        // the teleport of an accepted invitation, like any other: its screen,
-        // RLVa's checks, and in the demo the local teleport
-        if let Some((region, pos)) = instance.take_teleport()
-            && !self.teleport_to_location(region, pos)
-        {
-            log::info!("shared instance: the teleport beside the host was refused");
+        let (hide, show) = instance.take_visibility();
+        self.apply_instance_visibility(hide, show);
+    }
+
+    /// While we visit a shared place, ours is hidden like a temporary
+    /// derender (listed as such in the Asset blacklist, gone at a teleport
+    /// or by Clear temporary), and shown again when the visit ends.
+    fn apply_instance_visibility(&mut self, hide: Vec<(uuid::Uuid, bool)>, show: Vec<uuid::Uuid>) {
+        use crate::world::derender::{Entry, Kind};
+        if !show.is_empty() {
+            self.world.underender(&show);
+        }
+        if hide.is_empty() {
+            return;
+        }
+        let region = self.world.region_name();
+        let date = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_secs() as i64);
+        let name = aurora_i18n::tr!("instance-visit-hidden").to_string();
+        for (id, avatar) in hide {
+            let entry = Entry {
+                name: name.clone(),
+                region: if avatar { String::new() } else { region.clone() },
+                kind: if avatar { Kind::Resident } else { Kind::Object },
+                date,
+                permanent: false,
+            };
+            // never what we sit on (instance/place.rs leaves it out)
+            let _ = self.world.derender(id, entry);
+        }
+    }
+
+    /// Leave the instance we are in: its people and the place we visited
+    /// go, our own place comes back.
+    fn leave_instance(&mut self) {
+        let Some(mut old) = self.instance.take() else {
+            return;
+        };
+        for event in old.leave(&self.world) {
+            self.world.apply(event);
+        }
+        let (hide, show) = old.take_visibility();
+        self.apply_instance_visibility(hide, show);
+    }
+
+    /// Leave the instance we are in and join the one at `address` on the
+    /// next step.
+    fn join_instance(&mut self, address: String) {
+        // already there (a portal crossed again)
+        if self.instance.as_ref().and_then(|i| i.joined()) == Some(address.as_str()) {
+            return;
+        }
+        self.leave_instance();
+        self.instance_request = Some(crate::instance::Request::Join(address));
+    }
+
+    /// World › Portal to my shared place: a portal four metres ahead that
+    /// leads here and into our instance, open to friends only (its details
+    /// carry our address).
+    fn open_instance_portal(&mut self) {
+        let Some(address) = self.instance.as_ref().and_then(|i| i.invitation(&self.world)).map(|i| i.address) else {
+            return;
+        };
+        let yaw = self.world.agent.yaw;
+        let here = self.world.agent.position;
+        let center = here + glam::Vec3::new(yaw.cos(), yaw.sin(), 0.0) * 4.0;
+        let region = self.world.region_name();
+        let before = self.world.portals.own().map(|e| e.portal.id);
+        self.create_portal_at(region, here, aurora_net::bridge::portal::Access::Friends, center, yaw);
+        // (a refused portal leaves the one we had as it was)
+        if self.world.portals.own().map(|e| e.portal.id) != before {
+            self.world.portals.set_own_instance(address);
         }
     }
 
@@ -2117,11 +2185,7 @@ impl App {
     /// Hosting leaves an instance we were a guest in; stopping ends ours.
     fn toggle_instance_hosting(&mut self) {
         let hosting = crate::instance::hosting();
-        if let Some(mut old) = self.instance.take() {
-            for event in old.leave(&self.world) {
-                self.world.apply(event);
-            }
-        }
+        self.leave_instance();
         if hosting {
             let notice = crate::instance::notice(aurora_i18n::tr!("instance-share-stopped").to_string());
             self.world.apply(notice);
@@ -14616,6 +14680,7 @@ impl App {
                 ui::widgets::open_floater(&self.egui_ctx, "portals", &mut self.portal_ui.open);
             }
             BarAction::ShareInstance => self.toggle_instance_hosting(),
+            BarAction::InstancePortal => self.open_instance_portal(),
             BarAction::Build(t) => {
                 match t {
                     1 => self.build.open_build(crate::build::Tool::Edit),

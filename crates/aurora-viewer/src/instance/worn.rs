@@ -54,12 +54,7 @@ impl WornSender {
                 continue;
             }
             let key = root.key.local_id;
-            let mut prims = vec![worn_prim(root)];
-            for &c in world.objects.children_of(&root.key).iter().take(MAX_WORN_PRIMS - 1) {
-                if let Some(child) = world.objects.get(c) {
-                    prims.push(worn_prim(child));
-                }
-            }
+            let prims = linkset(world, root);
             let msg = Msg::Worn(Worn { id, root: key, prims });
             let line = wire::encode(&msg);
             if line.len() > wire::MAX_LINE {
@@ -87,6 +82,17 @@ impl WornSender {
     pub fn forget(&mut self, id: &Uuid) {
         self.sent.remove(id);
     }
+}
+
+/// A root and its children (at most `MAX_WORN_PRIMS` in all), for the wire.
+pub(super) fn linkset(world: &World, root: &Object) -> Vec<WornPrim> {
+    let mut prims = vec![worn_prim(root)];
+    for &c in world.objects.children_of(&root.key).iter().take(MAX_WORN_PRIMS - 1) {
+        if let Some(child) = world.objects.get(c) {
+            prims.push(worn_prim(child));
+        }
+    }
+    prims
 }
 
 fn worn_prim(o: &Object) -> WornPrim {

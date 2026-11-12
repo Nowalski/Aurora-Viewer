@@ -183,6 +183,7 @@ impl CrossingAsk {
                 &Destination {
                     region: portal.destination.clone(),
                     position: portal.position,
+                    instance: None,
                 },
             ),
             portal,

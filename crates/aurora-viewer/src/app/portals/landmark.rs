@@ -87,6 +87,7 @@ fn destination_at(world: &mut World, global: glam::DVec3) -> Result<Option<auror
                 (global.y - f64::from(y) * 256.0) as f32,
                 global.z as f32,
             ],
+            instance: None,
         }))
     } else {
         let (x, y) = ((global.x / 256.0) as i64, (global.y / 256.0) as i64);
@@ -319,6 +320,7 @@ mod tests {
         let expected = Some(aurora_net::bridge::portal::Destination {
             region: "Demo wide region".into(),
             position: [444.0, 388.0, 30.0],
+            instance: None,
         });
         assert_eq!(destination(&mut world, asset), Ok(expected.clone()));
         let region_id = uuid::Uuid::from_u128(5);

@@ -69,8 +69,9 @@ fn texts(env: &LineEnv, line: &ChatLine, v: &Invite) -> Texts {
             place: None,
             message: v.message.clone(),
             question: None,
+            // a visit: we stay where we are in SL, the host's place is shown
             buttons: (
-                aurora_i18n::tr!("common-teleport-3").into(),
+                aurora_i18n::tr!("instance-invite-visit").into(),
                 aurora_i18n::tr!("ui-notifications-decline").into(),
             ),
         },

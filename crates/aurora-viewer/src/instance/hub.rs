@@ -68,6 +68,10 @@ struct PeerCache {
     last: Option<Msg>,
     /// What it wears, by root key.
     worn: HashMap<u32, Msg>,
+    /// The host only: the linksets of its place, by root key, and its land
+    /// by row.
+    things: HashMap<u32, Msg>,
+    land: std::collections::BTreeMap<u32, Msg>,
 }
 
 impl Hub {
@@ -237,9 +241,14 @@ fn serve(shared: Arc<Shared>, conn: u64, stream: TcpStream, tx: Sender<Line>, ad
                 let mut st = shared.state.lock();
                 // Queued before this guest is added to the relay, so the
                 // snapshot always comes first in its queue.
+                // in one queued line, however many messages (a place can
+                // hold thousands of linksets)
+                let mut first = Vec::new();
                 for m in snapshot(&st.cache, id) {
-                    // At most three messages per peer: far below the queue size.
-                    let _ = tx.try_send(wire::encode(&m).into());
+                    first.extend_from_slice(&wire::encode(&m));
+                }
+                if !first.is_empty() {
+                    let _ = tx.try_send(first.into());
                 }
                 let arc: Line = wire::encode(&msg).into();
                 fanout(&mut st, &arc, None);
@@ -253,7 +262,13 @@ fn serve(shared: Arc<Shared>, conn: u64, stream: TcpStream, tx: Sender<Line>, ad
             }
             Some(pid) => {
                 // A guest speaks only for its own id, and says Hello once.
-                if msg.id() != pid || matches!(msg, Msg::Hello { .. } | Msg::Present { .. }) {
+                // (and only the host shares its place)
+                if msg.id() != pid
+                    || matches!(
+                        msg,
+                        Msg::Hello { .. } | Msg::Present { .. } | Msg::Thing(_) | Msg::Gone { .. } | Msg::Terrain { .. }
+                    )
+                {
                     continue;
                 }
                 let bye = matches!(msg, Msg::Bye { .. });
@@ -348,6 +363,17 @@ fn remember(cache: &mut HashMap<Uuid, PeerCache>, msg: &Msg) {
                 entry.worn.remove(root);
             }
         }
+        Msg::Thing(w) => {
+            cache.entry(w.id).or_default().things.insert(w.root, msg.clone());
+        }
+        Msg::Gone { id, root } => {
+            if let Some(entry) = cache.get_mut(id) {
+                entry.things.remove(root);
+            }
+        }
+        Msg::Terrain { id, row, .. } => {
+            cache.entry(*id).or_default().land.insert(*row, msg.clone());
+        }
         Msg::Bye { id } => {
             cache.remove(id);
         }
@@ -364,6 +390,8 @@ fn snapshot(cache: &HashMap<Uuid, PeerCache>, joining: Uuid) -> Vec<Msg> {
         out.extend(p.appearance.clone());
         out.extend(p.last.clone().filter(|l| Some(l) != p.appearance.as_ref()));
         out.extend(p.worn.values().cloned());
+        out.extend(p.land.values().cloned());
+        out.extend(p.things.values().cloned());
     }
     out
 }

@@ -21,6 +21,9 @@ pub enum Access {
 pub struct Destination {
     pub region: String,
     pub position: [f32; 3],
+    /// A shared instance the crossing also joins ("host:port"; experimental).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instance: Option<String>,
 }
 
 impl Destination {
@@ -32,7 +35,19 @@ impl Destination {
             && (0.0..=8192.0).contains(&self.position[0])
             && (0.0..=8192.0).contains(&self.position[1])
             && (0.0..=4096.0).contains(&self.position[2])
+            && self.instance.as_ref().is_none_or(|a| valid_instance_address(a))
     }
+}
+
+/// "host:port", short, of plain address characters: it is only ever used to
+/// open a TCP link after the user crossed the portal.
+fn valid_instance_address(address: &str) -> bool {
+    address.len() <= 64
+        && address.rsplit_once(':').is_some_and(|(host, port)| {
+            !host.is_empty()
+                && host.chars().all(|c| c.is_ascii_alphanumeric() || ".-[]:".contains(c))
+                && port.parse::<u16>().is_ok_and(|p| p != 0)
+        })
 }
 
 /// The only broadcastable representation. Restricted portals omit all
@@ -103,6 +118,7 @@ impl Portal {
             destination: Destination {
                 region: self.destination.clone(),
                 position: self.position,
+                instance: None,
             },
             access: self.access,
         }

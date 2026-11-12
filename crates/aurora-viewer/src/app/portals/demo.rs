@@ -288,6 +288,41 @@ impl App {
         }));
     }
 
+    /// AURORA_DEMO_INSTANCE_PORTAL=<host:port>: a demo friend opens a portal
+    /// four metres ahead of us into the shared instance at that address (the
+    /// window hosting it), friends only; its details come through the same
+    /// exchange as any private portal's.
+    pub(in crate::app) fn seed_instance_portal_demo(&mut self, address: String) {
+        let ahead = Vec3::new(self.world.agent.yaw.cos(), self.world.agent.yaw.sin(), 0.0);
+        let center = self.world.agent.position + ahead * 4.0;
+        let unix = unix_time();
+        let portal = Portal {
+            id: uuid::Uuid::new_v4(),
+            region: self.world.main_region.unwrap_or(256),
+            center: center.to_array(),
+            yaw: self.world.agent.yaw,
+            destination: self.world.region_name(),
+            position: (self.world.agent.position + ahead * 8.0).to_array(),
+            access: Access::Friends,
+            expires: unix + LIFETIME,
+        };
+        let owner = uuid::Uuid::from_u128(0xA770);
+        self.seed_portal_peer_demo("instance-friends-allowed", portal.clone(), owner);
+        if let Some(peer) = &mut self.portal_demo_peer {
+            peer.state.set_own_instance(address);
+        }
+        if let Some(wire) = aurora_net::bridge::portal::Message::Open(portal.announcement()).encode() {
+            let mut state = std::mem::take(&mut self.world.portals);
+            state.receive(
+                &self.world,
+                &format!("<auroraPortal>{owner}|{wire}</auroraPortal>"),
+                Instant::now(),
+                unix,
+            );
+            self.world.portals = state;
+        }
+    }
+
     pub(in crate::app) fn exchange_portal_demo(&mut self) {
         let Some(peer) = &mut self.portal_demo_peer else { return };
         let peer = peer.as_mut();

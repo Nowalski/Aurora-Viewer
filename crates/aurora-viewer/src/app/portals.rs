@@ -277,6 +277,14 @@ impl App {
     }
 
     fn cross_portal(&mut self, creator: uuid::Uuid, portal: Portal, now: Instant) {
+        // a friend's portal into their shared instance (experimental): the
+        // crossing is a visit, no teleport in SL; their place is shown here
+        if creator != self.world.agent_id
+            && let Some(address) = self.world.portals.instance_of(creator, portal.id)
+        {
+            self.join_instance(address);
+            return;
+        }
         // Ordinary location teleports retain RLVa, maturity, map lookup,
         // cancellation and simulator access checks (LLAgent::teleportViaLocation).
         let journey = Journey::new(&self.world, creator, &portal, now);

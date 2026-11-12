@@ -424,6 +424,22 @@ impl State {
             .find(|entry| entry.owner == owner && entry.portal.id == id && entry.allowed(world))
     }
 
+    /// Our open portal also leads into the shared instance at `address`
+    /// (experimental): its details, sent only to those it is open to, say so.
+    pub fn set_own_instance(&mut self, address: String) {
+        if let Some(details) = self.entries.iter_mut().find(|e| e.created).and_then(|e| e.details.as_mut()) {
+            details.destination.instance = Some(address);
+        }
+    }
+
+    /// The shared instance a portal of `owner` leads into, if any.
+    pub fn instance_of(&self, owner: Uuid, id: Uuid) -> Option<String> {
+        self.entries
+            .iter()
+            .find(|e| e.owner == owner && e.portal.id == id)
+            .and_then(|e| e.details.as_ref()?.destination.instance.clone())
+    }
+
     /// The user said Go: later crossings of this portal ask no more.
     pub fn confirm(&mut self, owner: Uuid, id: Uuid) {
         if self.confirmed.len() < LIMIT * 2 {

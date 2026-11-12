@@ -48,14 +48,36 @@ pub enum Msg {
         id: Uuid,
         root: u32,
     },
+    /// A linkset standing in the host's place (`id`: the host), as it is
+    /// now: what a visiting guest draws instead of its own place.
+    Thing(Worn),
+    /// That linkset is gone from the host's place.
+    Gone {
+        id: Uuid,
+        root: u32,
+    },
+    /// Sixteen metres of the host's land: rows `row * 16` to `row * 16 + 15`
+    /// of its heightmap, `size_x` heights each (f32 little endian, base64).
+    Terrain {
+        id: Uuid,
+        row: u32,
+        size_x: u32,
+        heights: String,
+    },
 }
 
 impl Msg {
     pub fn id(&self) -> Uuid {
         match self {
-            Msg::Hello { id, .. } | Msg::Present { id, .. } | Msg::Chat { id, .. } | Msg::Bye { id } | Msg::Unworn { id, .. } => *id,
+            Msg::Hello { id, .. }
+            | Msg::Present { id, .. }
+            | Msg::Chat { id, .. }
+            | Msg::Bye { id }
+            | Msg::Unworn { id, .. }
+            | Msg::Gone { id, .. }
+            | Msg::Terrain { id, .. } => *id,
             Msg::State(s) => s.id,
-            Msg::Worn(w) => w.id,
+            Msg::Worn(w) | Msg::Thing(w) => w.id,
         }
     }
 }
@@ -158,26 +180,44 @@ pub fn valid(msg: &Msg) -> bool {
         Msg::Hello { name, .. } | Msg::Present { name, .. } => valid_name(name),
         Msg::State(state) => valid_state(state),
         Msg::Chat { text, chat_type, .. } => !text.is_empty() && text.len() <= MAX_CHAT && *chat_type <= 2,
-        Msg::Bye { .. } | Msg::Unworn { .. } => true,
-        Msg::Worn(worn) => valid_worn(worn),
+        Msg::Bye { .. } | Msg::Unworn { .. } | Msg::Gone { .. } => true,
+        Msg::Worn(worn) => valid_worn(worn, false),
+        Msg::Thing(thing) => valid_worn(thing, true),
+        Msg::Terrain { row, size_x, heights, .. } => {
+            (256..=MAX_REGION).contains(size_x)
+                && size_x % 16 == 0
+                && *row < MAX_REGION / 16
+                && heights.len() <= (*size_x as usize * 16 * 4).div_ceil(3) * 4
+        }
     }
 }
+
+/// Widest region (m) whose land a host shares.
+pub const MAX_REGION: u32 = 1024;
 
 /// Largest base64 string of a worn prim's extra parameters.
 const MAX_EXTRA_B64: usize = 4 * 1024;
 
-fn valid_worn(worn: &Worn) -> bool {
+/// A linkset's bounds; `placed`: the root stands in the region (its
+/// position is a region position), rather than on an attachment point.
+fn valid_worn(worn: &Worn, placed: bool) -> bool {
     let Some(root) = worn.prims.first() else {
         return false;
     };
+    let [x, y, z] = root.pos;
+    let root_ok =
+        !placed || ((0.0..=MAX_REGION as f32).contains(&x) && (0.0..=MAX_REGION as f32).contains(&y) && (-100.0..=4096.0).contains(&z));
+    // (megaprims in a place, the 64 m limit on worn prims)
+    let max_scale = if placed { 256.0 } else { 64.0 };
     root.key == worn.root
+        && root_ok
         && worn.prims.len() <= MAX_WORN_PRIMS
-        && worn.prims.iter().all(|p| {
+        && worn.prims.iter().enumerate().all(|(i, p)| {
             let finite = p.pos.iter().chain(&p.rot).chain(&p.scale).all(|v| v.is_finite());
             finite
                 && p.key != 0
-                && p.pos.iter().all(|v| v.abs() <= 64.0)
-                && p.scale.iter().all(|v| (0.0..=64.0).contains(v))
+                && ((placed && i == 0) || p.pos.iter().all(|v| v.abs() <= 256.0))
+                && p.scale.iter().all(|v| (0.0..=max_scale).contains(v))
                 && p.te.len() <= MAX_APPEARANCE_B64
                 && p.extra.len() <= MAX_EXTRA_B64
         })
