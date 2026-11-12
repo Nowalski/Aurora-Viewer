@@ -171,7 +171,7 @@ impl SavedLand {
     /// The land as it was, as terrain patches.
     pub fn restore(&self, handle: RegionHandle) -> Option<NetEvent> {
         let w = self.size_x as usize;
-        if w == 0 || self.heights.len() % (w * 16) != 0 {
+        if w == 0 || !self.heights.len().is_multiple_of(w * 16) {
             return None;
         }
         let rows = self.heights.len() / (w * 16);
@@ -224,7 +224,7 @@ impl Visit {
     /// What of our place to hide now: the root objects of our region and its
     /// people, but not us, what we sit on, nor who the instance shows
     /// (`shown`). Each id with whether it is an avatar.
-    pub fn to_hide(&mut self, world: &World, shown: impl Fn(&Uuid) -> bool, now: Instant) -> Vec<(Uuid, bool)> {
+    pub fn hide_now(&mut self, world: &World, shown: impl Fn(&Uuid) -> bool, now: Instant) -> Vec<(Uuid, bool)> {
         if self.checked.is_some_and(|t| now.duration_since(t) < HIDE_CHECK) {
             return Vec::new();
         }

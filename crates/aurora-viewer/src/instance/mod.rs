@@ -325,7 +325,7 @@ impl Instance {
             let mirror = &self.mirror;
             let region_shows = &self.region_shows;
             self.hide
-                .extend(visit.to_hide(world, |id| mirror.contains(id) || region_shows.contains(id), now));
+                .extend(visit.hide_now(world, |id| mirror.contains(id) || region_shows.contains(id), now));
         }
         if let Link::Guest(client) = &self.link
             && !client.connected()
