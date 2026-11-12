@@ -51,6 +51,11 @@ impl Capture {
         Self::default()
     }
 
+    /// Whether a first state went out.
+    pub fn started(&self) -> bool {
+        self.last_state.is_some()
+    }
+
     /// The state to send now, if one is due. `peer_id` is the instance id
     /// of this viewer, not the avatar's agent id.
     pub fn state(&mut self, world: &World, peer_id: Uuid, now: Instant) -> Option<PeerState> {
@@ -67,6 +72,7 @@ impl Capture {
             flying: world.agent.flying,
             anims: pose.anims.clone(),
             appearance,
+            body_te: None,
         };
         self.last_state = Some((now, pose));
         Some(state)

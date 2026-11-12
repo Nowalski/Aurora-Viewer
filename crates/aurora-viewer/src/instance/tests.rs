@@ -77,6 +77,7 @@ fn peer_state(id: Uuid, x: f32, appearance: Option<PeerAppearance>) -> PeerState
         flying: false,
         anims: vec![(Uuid::new_v4(), 1)],
         appearance,
+        body_te: None,
     }
 }
 

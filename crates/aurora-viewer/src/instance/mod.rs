@@ -15,6 +15,7 @@ pub mod mirror;
 #[cfg(test)]
 mod tests;
 pub mod wire;
+pub mod worn;
 
 use std::time::{Duration, Instant};
 
@@ -66,6 +67,8 @@ pub struct Instance {
     peer_id: Uuid,
     capture: capture::Capture,
     mirror: mirror::Mirror,
+    /// What our own avatar wears.
+    worn: worn::WornSender,
     lost_reported: bool,
     started: Instant,
 }
@@ -129,6 +132,7 @@ impl Instance {
             peer_id,
             capture: capture::Capture::new(),
             mirror: mirror::Mirror::new(),
+            worn: worn::WornSender::default(),
             lost_reported: false,
             started: now,
         };
@@ -142,11 +146,19 @@ impl Instance {
             return Vec::new();
         };
         let state = self.capture.state(world, self.peer_id, now);
+        // (after our first state, so the peers have our avatar to hang it on)
+        let own_worn = match world.objects.index_of_uuid(&world.agent_id).and_then(|i| world.objects.get(i)) {
+            Some(avatar) if self.capture.started() => self.worn.messages(world, self.peer_id, avatar, now),
+            _ => Vec::new(),
+        };
         let mut incoming = Vec::new();
         match &mut self.link {
             Link::Host(hub, crowd) => {
                 if let Some(state) = state {
                     hub.send(wire::Msg::State(state));
+                }
+                for msg in own_worn {
+                    hub.send(msg);
                 }
                 let mirror = &self.mirror;
                 for msg in crowd.messages(world, |id| mirror.contains(id), now) {
@@ -159,6 +171,9 @@ impl Instance {
             Link::Guest(client) => {
                 if let Some(state) = state {
                     client.send(wire::Msg::State(state));
+                }
+                for msg in own_worn {
+                    client.send(msg);
                 }
                 while let Some(msg) = client.try_recv() {
                     incoming.push(msg);

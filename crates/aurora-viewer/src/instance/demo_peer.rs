@@ -121,6 +121,7 @@ impl DemoPeer {
             flying: false,
             anims,
             appearance,
+            body_te: None,
         }
     }
 }

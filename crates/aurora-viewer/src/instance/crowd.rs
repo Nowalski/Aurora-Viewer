@@ -9,8 +9,14 @@ use std::time::{Duration, Instant};
 use glam::{Quat, Vec3};
 use uuid::Uuid;
 
+use aurora_net::local_bakes::AVATAR_FACES;
+use aurora_prim::te::pack_texture_entry;
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD;
+
 use super::capture::encode_appearance;
 use super::wire::{self, Msg, PeerState};
+use super::worn::WornSender;
 use crate::world::World;
 use crate::world::objects::{ObjKey, Object};
 
@@ -30,11 +36,14 @@ struct Sent {
     appearance_at: Option<Instant>,
     appearance_cof: i32,
     appearance_len: usize,
+    /// The avatar object's texture entry as last sent.
+    body_te: Option<String>,
 }
 
 #[derive(Default)]
 pub struct Crowd {
     sent: HashMap<Uuid, Sent>,
+    worn: WornSender,
 }
 
 impl Crowd {
@@ -80,15 +89,25 @@ impl Crowd {
                 let since = now.duration_since(s.at);
                 (changed && since >= MOVING) || since >= HEARTBEAT
             });
+            // what it wears goes by its own rhythm, after its first state
+            if !fresh {
+                out.extend(self.worn.messages(world, id, avatar, now));
+            }
             if !due {
                 continue;
             }
-            let looks_due = appearance.is_some_and(|a| {
-                self.sent.get(&id).is_none_or(|s| {
-                    s.appearance_cof != a.cof_version
-                        || s.appearance_len != a.visual_params.len()
-                        || s.appearance_at.is_none_or(|t| now.duration_since(t) >= APPEARANCE_AGAIN)
-                })
+            // the bakes of an avatar without an appearance message are in
+            // its object's own texture entry
+            let body_te = avatar
+                .te
+                .as_ref()
+                .map(|t| pack_texture_entry(t, AVATAR_FACES))
+                .filter(|p| !p.is_empty())
+                .map(|p| STANDARD.encode(p));
+            let looks_due = self.sent.get(&id).is_none_or(|s| {
+                s.appearance_at.is_none_or(|t| now.duration_since(t) >= APPEARANCE_AGAIN)
+                    || s.body_te != body_te
+                    || appearance.is_some_and(|a| s.appearance_cof != a.cof_version || s.appearance_len != a.visual_params.len())
             });
             let encoded = if looks_due { appearance.and_then(encode_appearance) } else { None };
             let entry = self.sent.entry(id).or_insert(Sent {
@@ -99,17 +118,17 @@ impl Crowd {
                 appearance_at: None,
                 appearance_cof: i32::MIN,
                 appearance_len: 0,
+                body_te: None,
             });
             entry.at = now;
             entry.pos = pos;
             entry.rot = rot;
             entry.anims.clone_from(&anims);
-            if encoded.is_some()
-                && let Some(a) = appearance
-            {
+            if looks_due {
                 entry.appearance_at = Some(now);
-                entry.appearance_cof = a.cof_version;
-                entry.appearance_len = a.visual_params.len();
+                entry.appearance_cof = appearance.map_or(i32::MIN, |a| a.cof_version);
+                entry.appearance_len = appearance.map_or(0, |a| a.visual_params.len());
+                entry.body_te.clone_from(&body_te);
             }
             out.push(Msg::State(PeerState {
                 id,
@@ -119,12 +138,14 @@ impl Crowd {
                 flying: false,
                 anims,
                 appearance: encoded,
+                body_te: if looks_due { body_te } else { None },
             }));
         }
         // those who left the place (or the view)
         let gone: Vec<Uuid> = self.sent.keys().filter(|id| !seen.contains(id)).copied().collect();
         for id in gone {
             self.sent.remove(&id);
+            self.worn.forget(&id);
             out.push(Msg::Bye { id });
         }
         out

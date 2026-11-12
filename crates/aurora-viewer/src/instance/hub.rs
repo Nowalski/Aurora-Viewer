@@ -66,6 +66,8 @@ struct PeerCache {
     hello: Option<Msg>,
     appearance: Option<Msg>,
     last: Option<Msg>,
+    /// What it wears, by root key.
+    worn: HashMap<u32, Msg>,
 }
 
 impl Hub {
@@ -332,12 +334,20 @@ fn remember(cache: &mut HashMap<Uuid, PeerCache>, msg: &Msg) {
         Msg::Hello { id, .. } | Msg::Present { id, .. } => cache.entry(*id).or_default().hello = Some(msg.clone()),
         Msg::State(s) => {
             let entry = cache.entry(s.id).or_default();
-            if s.appearance.is_some() {
+            if s.appearance.is_some() || s.body_te.is_some() {
                 entry.appearance = Some(msg.clone());
             }
             entry.last = Some(msg.clone());
         }
         Msg::Chat { .. } => {}
+        Msg::Worn(w) => {
+            cache.entry(w.id).or_default().worn.insert(w.root, msg.clone());
+        }
+        Msg::Unworn { id, root } => {
+            if let Some(entry) = cache.get_mut(id) {
+                entry.worn.remove(root);
+            }
+        }
         Msg::Bye { id } => {
             cache.remove(id);
         }
@@ -345,13 +355,15 @@ fn remember(cache: &mut HashMap<Uuid, PeerCache>, msg: &Msg) {
 }
 
 /// What a guest with id `joining` is sent first: the Hello of every other
-/// peer, so each is known, then its appearance and its latest state.
+/// peer, so each is known, then its appearance, its latest state and what
+/// it wears.
 fn snapshot(cache: &HashMap<Uuid, PeerCache>, joining: Uuid) -> Vec<Msg> {
     let others = || cache.iter().filter(|(id, _)| **id != joining);
     let mut out: Vec<Msg> = others().filter_map(|(_, p)| p.hello.clone()).collect();
     for (_, p) in others() {
         out.extend(p.appearance.clone());
         out.extend(p.last.clone().filter(|l| Some(l) != p.appearance.as_ref()));
+        out.extend(p.worn.values().cloned());
     }
     out
 }

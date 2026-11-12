@@ -4,7 +4,8 @@
 //! the returned events with `world.apply`, like any simulator message.
 
 use super::capture::decode_appearance;
-use super::wire::{Msg, PeerState};
+use super::wire::{Msg, PeerState, Worn};
+use super::worn::{decode_te, prim_update};
 use aurora_net::objects::{AttachedSound, ObjectUpdate, ParticleUpdate, TerseUpdate};
 use aurora_net::{ChatMessage, ChatSourceType, ChatType, NetEvent, RegionHandle};
 use aurora_prim::ExtraParams;
@@ -38,6 +39,26 @@ struct Peer {
     anims: Option<Vec<(Uuid, i32)>>,
     /// An Aurora peer (joined / left notices), not someone of the host's place.
     announced: bool,
+    /// The avatar object's texture entry last applied (base64, as sent).
+    body_te: Option<String>,
+    /// What it wears, by root key: the latest linkset, applied once the
+    /// avatar object exists.
+    worn: HashMap<u32, Worn>,
+    /// Our local id and full id for each of its worn prims (by its key).
+    worn_ids: HashMap<u32, (u32, Uuid)>,
+    /// The local ids each linkset was given, by root key.
+    worn_local: HashMap<u32, Vec<u32>>,
+}
+
+impl Peer {
+    /// Local ids of the avatar and everything it wears, to remove them.
+    fn all_local_ids(&self) -> Vec<u32> {
+        let mut ids: Vec<u32> = self.worn_local.values().flatten().copied().collect();
+        if self.object {
+            ids.push(self.local_id);
+        }
+        ids
+    }
 }
 
 impl Default for Mirror {
@@ -63,12 +84,14 @@ impl Mirror {
             Msg::State(state) => self.state(state, handle),
             Msg::Chat { id, text, chat_type } => self.chat(*id, text, *chat_type),
             Msg::Bye { id } => self.bye(*id, handle),
+            Msg::Worn(worn) => self.worn(worn, handle),
+            Msg::Unworn { id, root } => self.unworn(*id, *root, handle),
         }
     }
 
     /// Removes every mirrored avatar (the instance ended or we left it).
     pub fn clear(&mut self, handle: RegionHandle) -> Vec<NetEvent> {
-        let local_ids: Vec<u32> = self.peers.values().filter(|p| p.object).map(|p| p.local_id).collect();
+        let local_ids: Vec<u32> = self.peers.values().flat_map(Peer::all_local_ids).collect();
         self.peers.clear();
         if local_ids.is_empty() {
             Vec::new()
@@ -115,6 +138,10 @@ impl Mirror {
                 velocity: Vec3::ZERO,
                 anims: None,
                 announced: notice,
+                body_te: None,
+                worn: HashMap::new(),
+                worn_ids: HashMap::new(),
+                worn_local: HashMap::new(),
             },
         );
         joined.into_iter().collect()
@@ -132,7 +159,8 @@ impl Mirror {
         peer.velocity = velocity;
 
         let mut events = Vec::with_capacity(3);
-        if peer.object {
+        let new_te = s.body_te.as_ref().filter(|te| peer.body_te.as_ref() != Some(*te));
+        if peer.object && new_te.is_none() {
             events.push(NetEvent::TerseUpdates {
                 handle,
                 updates: vec![TerseUpdate {
@@ -149,11 +177,24 @@ impl Mirror {
                 }],
             });
         } else {
-            peer.object = true;
+            // first state, or new bakes in the object's own texture entry: a
+            // full update, as the simulator sends when they change
+            if let Some(te) = new_te {
+                peer.body_te = Some(te.clone());
+            }
+            let mut object = avatar_object(peer.local_id, s.id, &peer.name, position, rotation, velocity);
+            object.texture_entry = peer.body_te.as_deref().and_then(decode_te).map(Into::into);
             events.push(NetEvent::ObjectUpdates {
                 handle,
-                objects: vec![avatar_object(peer.local_id, s.id, &peer.name, position, rotation, velocity)],
+                objects: vec![object],
             });
+            if !peer.object {
+                peer.object = true;
+                let roots: Vec<u32> = peer.worn.keys().copied().collect();
+                for root in roots {
+                    events.extend(linkset_events(peer, &mut self.next_local_id, s.id, root, handle));
+                }
+            }
         }
 
         if peer.anims.as_deref() != Some(s.anims.as_slice()) {
@@ -199,17 +240,82 @@ impl Mirror {
             return Vec::new();
         };
         let mut events = Vec::with_capacity(2);
-        if peer.object {
-            events.push(NetEvent::ObjectsKilled {
-                handle,
-                local_ids: vec![peer.local_id],
-            });
+        let local_ids = peer.all_local_ids();
+        if !local_ids.is_empty() {
+            events.push(NetEvent::ObjectsKilled { handle, local_ids });
         }
         if peer.announced {
             events.push(system_notice(aurora_i18n::tr!("instance-peer-left", name = peer.name.as_str())));
         }
         events
     }
+}
+
+impl Mirror {
+    fn worn(&mut self, worn: &Worn, handle: RegionHandle) -> Vec<NetEvent> {
+        let Some(peer) = self.peers.get_mut(&worn.id) else {
+            return Vec::new();
+        };
+        peer.worn.insert(worn.root, worn.clone());
+        if !peer.object {
+            return Vec::new();
+        }
+        linkset_events(peer, &mut self.next_local_id, worn.id, worn.root, handle)
+    }
+
+    fn unworn(&mut self, id: Uuid, root: u32, handle: RegionHandle) -> Vec<NetEvent> {
+        let Some(peer) = self.peers.get_mut(&id) else {
+            return Vec::new();
+        };
+        if let Some(worn) = peer.worn.remove(&root) {
+            for p in &worn.prims {
+                peer.worn_ids.remove(&p.key);
+            }
+        }
+        match peer.worn_local.remove(&root) {
+            Some(local_ids) if !local_ids.is_empty() => vec![NetEvent::ObjectsKilled { handle, local_ids }],
+            _ => Vec::new(),
+        }
+    }
+}
+
+/// The world events of a peer's linkset as it is now: full updates of its
+/// prims, and the removal of those it no longer has.
+fn linkset_events(peer: &mut Peer, next_local_id: &mut u32, avatar: Uuid, root: u32, handle: RegionHandle) -> Vec<NetEvent> {
+    let Some(worn) = peer.worn.get(&root) else {
+        return Vec::new();
+    };
+    let mut objects = Vec::with_capacity(worn.prims.len());
+    let mut locals = Vec::with_capacity(worn.prims.len());
+    let mut root_local = None;
+    for p in &worn.prims {
+        let (local_id, full_id) = *peer.worn_ids.entry(p.key).or_insert_with(|| {
+            let local = *next_local_id;
+            *next_local_id = next_local_id.wrapping_add(1);
+            (local, Uuid::new_v4())
+        });
+        // the root hangs on the avatar, the others on the root
+        let parent = root_local.unwrap_or(peer.local_id);
+        match prim_update(p, local_id, full_id, parent, avatar) {
+            Some(update) => {
+                objects.push(update);
+                locals.push(local_id);
+                root_local.get_or_insert(local_id);
+            }
+            None if root_local.is_none() => break,
+            None => {}
+        }
+    }
+    let before = peer.worn_local.insert(root, locals.clone()).unwrap_or_default();
+    let gone: Vec<u32> = before.into_iter().filter(|l| !locals.contains(l)).collect();
+    let mut events = Vec::with_capacity(2);
+    if !gone.is_empty() {
+        events.push(NetEvent::ObjectsKilled { handle, local_ids: gone });
+    }
+    if !objects.is_empty() {
+        events.push(NetEvent::ObjectUpdates { handle, objects });
+    }
+    events
 }
 
 /// A chat line from the instance itself rather than from an avatar.
@@ -313,6 +419,7 @@ mod tests {
             flying: false,
             anims,
             appearance: None,
+            body_te: None,
         })
     }
 
@@ -411,6 +518,83 @@ mod tests {
         assert_eq!(count(&gone, |e| matches!(e, NetEvent::Chat(_))), 0);
         assert_eq!(count(&gone, |e| matches!(e, NetEvent::ObjectsKilled { .. })), 1);
         assert!(!m.contains(&id));
+    }
+
+    fn worn(id: Uuid, keys: &[u32]) -> Msg {
+        let prim = |key| super::super::wire::WornPrim {
+            key,
+            state: 0x40,
+            pcode: aurora_prim::params::LL_PCODE_VOLUME,
+            material: 3,
+            pos: [0.0; 3],
+            rot: [0.0, 0.0, 0.0, 1.0],
+            scale: [0.1; 3],
+            shape: [0; 18],
+            te: String::new(),
+            extra: "AA==".into(),
+        };
+        Msg::Worn(Worn {
+            id,
+            root: keys[0],
+            prims: keys.iter().map(|&k| prim(k)).collect(),
+        })
+    }
+
+    fn updates(events: &[NetEvent]) -> Vec<(u32, u32)> {
+        events
+            .iter()
+            .filter_map(|e| match e {
+                NetEvent::ObjectUpdates { objects, .. } => Some(objects.iter().map(|o| (o.local_id, o.parent_id))),
+                _ => None,
+            })
+            .flatten()
+            .collect()
+    }
+
+    #[test]
+    fn worn_linksets_hang_on_the_avatar_and_go_with_it() {
+        let mut m = Mirror::new();
+        let id = peer_id(9);
+        m.apply(&hello(id, "Ada Lovelace"), HANDLE);
+        // before the avatar exists it waits
+        assert!(m.apply(&worn(id, &[50, 51, 52]), HANDLE).is_empty());
+        let created = updates(&m.apply(&state(id, Vec::new()), HANDLE));
+        let avatar = FIRST_LOCAL_ID;
+        assert_eq!(created.len(), 4);
+        assert_eq!(created[0], (avatar, 0));
+        let root = created[1].0;
+        assert_eq!(created[1].1, avatar);
+        assert!(created[2..].iter().all(|&(_, parent)| parent == root));
+        // a child taken out of the linkset is removed, the others keep their ids
+        let changed = m.apply(&worn(id, &[50, 51]), HANDLE);
+        assert_eq!(updates(&changed), vec![(root, avatar), (created[2].0, root)]);
+        assert_eq!(
+            count(
+                &changed,
+                |e| matches!(e, NetEvent::ObjectsKilled { local_ids, .. } if local_ids == &vec![created[3].0])
+            ),
+            1
+        );
+        // a second linkset, then taken off
+        m.apply(&worn(id, &[60]), HANDLE);
+        let off = m.apply(&Msg::Unworn { id, root: 60 }, HANDLE);
+        assert_eq!(
+            count(
+                &off,
+                |e| matches!(e, NetEvent::ObjectsKilled { local_ids, .. } if local_ids.len() == 1)
+            ),
+            1
+        );
+        // leaving takes the avatar and what it still wears
+        let gone = m.apply(&Msg::Bye { id }, HANDLE);
+        let killed: usize = gone
+            .iter()
+            .map(|e| match e {
+                NetEvent::ObjectsKilled { local_ids, .. } => local_ids.len(),
+                _ => 0,
+            })
+            .sum();
+        assert_eq!(killed, 3);
     }
 
     #[test]

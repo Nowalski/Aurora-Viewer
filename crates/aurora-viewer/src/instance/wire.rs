@@ -7,11 +7,14 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 /// Longest line accepted (bytes, newline excluded). An appearance (texture
-/// entry and visual parameters in base64) is well under it.
-pub const MAX_LINE: usize = 64 * 1024;
+/// entry and visual parameters in base64) is well under it; a worn linkset
+/// of `MAX_WORN_PRIMS` prims with busy texture entries fits too.
+pub const MAX_LINE: usize = 256 * 1024;
 pub const MAX_NAME: usize = 64;
 pub const MAX_CHAT: usize = 1024;
 pub const MAX_ANIMS: usize = 64;
+/// Prims of one worn linkset (the simulator's link limit).
+pub const MAX_WORN_PRIMS: usize = 256;
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(tag = "t", rename_all = "snake_case", deny_unknown_fields)]
@@ -38,13 +41,21 @@ pub enum Msg {
     Bye {
         id: Uuid,
     },
+    /// One linkset the avatar `id` wears, as it is now (sent when it changed).
+    Worn(Worn),
+    /// The avatar took off the linkset whose root was `root`.
+    Unworn {
+        id: Uuid,
+        root: u32,
+    },
 }
 
 impl Msg {
     pub fn id(&self) -> Uuid {
         match self {
-            Msg::Hello { id, .. } | Msg::Present { id, .. } | Msg::Chat { id, .. } | Msg::Bye { id } => *id,
+            Msg::Hello { id, .. } | Msg::Present { id, .. } | Msg::Chat { id, .. } | Msg::Bye { id } | Msg::Unworn { id, .. } => *id,
             Msg::State(s) => s.id,
+            Msg::Worn(w) => w.id,
         }
     }
 }
@@ -63,6 +74,44 @@ pub struct PeerState {
     pub anims: Vec<(Uuid, i32)>,
     /// Sent when it changed, and again now and then for late arrivals.
     pub appearance: Option<PeerAppearance>,
+    /// The avatar object's own texture entry, packed, base64: where a viewer
+    /// finds the bakes when no appearance message came (sent with the looks).
+    #[serde(default)]
+    pub body_te: Option<String>,
+}
+
+/// A worn linkset: ids and shape parameters only, each viewer loads the
+/// textures and meshes itself.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct Worn {
+    /// The avatar wearing it.
+    pub id: Uuid,
+    /// Key of its root prim (the sender's local id).
+    pub root: u32,
+    /// The root first, then its children.
+    pub prims: Vec<WornPrim>,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
+#[serde(deny_unknown_fields)]
+pub struct WornPrim {
+    /// The sender's local id of the prim.
+    pub key: u32,
+    /// The sender's state byte: the attachment point, as the simulator packs it.
+    pub state: u8,
+    pub pcode: u8,
+    pub material: u8,
+    /// Relative to the attachment point (root) or to the root (children).
+    pub pos: [f32; 3],
+    pub rot: [f32; 4],
+    pub scale: [f32; 3],
+    /// Quantised shape (`RawShape`, in its field order).
+    pub shape: [i32; 18],
+    /// Packed texture entry, base64.
+    pub te: String,
+    /// Packed extra parameters (sculpt or mesh, flexible, light…), base64.
+    pub extra: String,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -109,8 +158,29 @@ pub fn valid(msg: &Msg) -> bool {
         Msg::Hello { name, .. } | Msg::Present { name, .. } => valid_name(name),
         Msg::State(state) => valid_state(state),
         Msg::Chat { text, chat_type, .. } => !text.is_empty() && text.len() <= MAX_CHAT && *chat_type <= 2,
-        Msg::Bye { .. } => true,
+        Msg::Bye { .. } | Msg::Unworn { .. } => true,
+        Msg::Worn(worn) => valid_worn(worn),
     }
+}
+
+/// Largest base64 string of a worn prim's extra parameters.
+const MAX_EXTRA_B64: usize = 4 * 1024;
+
+fn valid_worn(worn: &Worn) -> bool {
+    let Some(root) = worn.prims.first() else {
+        return false;
+    };
+    root.key == worn.root
+        && worn.prims.len() <= MAX_WORN_PRIMS
+        && worn.prims.iter().all(|p| {
+            let finite = p.pos.iter().chain(&p.rot).chain(&p.scale).all(|v| v.is_finite());
+            finite
+                && p.key != 0
+                && p.pos.iter().all(|v| v.abs() <= 64.0)
+                && p.scale.iter().all(|v| (0.0..=64.0).contains(v))
+                && p.te.len() <= MAX_APPEARANCE_B64
+                && p.extra.len() <= MAX_EXTRA_B64
+        })
 }
 
 /// Non-blank, at most `MAX_NAME` characters, no control characters (they
@@ -134,6 +204,7 @@ fn valid_state(state: &PeerState) -> bool {
         && state.anims.len() <= MAX_ANIMS
         && state.anims.iter().all(|(asset, _)| !asset.is_nil())
         && state.appearance.as_ref().is_none_or(valid_appearance)
+        && state.body_te.as_ref().is_none_or(|te| te.len() <= MAX_APPEARANCE_B64)
 }
 
 fn valid_appearance(appearance: &PeerAppearance) -> bool {
@@ -159,6 +230,7 @@ mod tests {
             flying: false,
             anims: vec![(Uuid::from_u128(2), 1)],
             appearance: None,
+            body_te: None,
         }
     }
 
@@ -169,6 +241,43 @@ mod tests {
             hover: 0.0,
             cof_version: 3,
         }
+    }
+
+    fn worn() -> Worn {
+        let prim = |key| WornPrim {
+            key,
+            state: 0x40,
+            pcode: 9,
+            material: 3,
+            pos: [0.0, 0.0, 0.04],
+            rot: [0.0, 0.0, 0.0, 1.0],
+            scale: [0.1; 3],
+            shape: [0; 18],
+            te: "AAAA".into(),
+            extra: "AA==".into(),
+        };
+        Worn {
+            id: peer(),
+            root: 7,
+            prims: vec![prim(7), prim(8)],
+        }
+    }
+
+    #[test]
+    fn worn_bounds() {
+        assert!(valid(&Msg::Worn(worn())));
+        let mut w = worn();
+        w.root = 8;
+        assert!(!valid(&Msg::Worn(w)), "the root comes first");
+        let mut w = worn();
+        w.prims.clear();
+        assert!(!valid(&Msg::Worn(w)));
+        let mut w = worn();
+        w.prims[1].scale[0] = 1000.0;
+        assert!(!valid(&Msg::Worn(w)));
+        let mut w = worn();
+        w.prims[1].pos[2] = f32::NAN;
+        assert!(!valid(&Msg::Worn(w)));
     }
 
     /// Encode, drop the newline, decode: what a socket reader does.
@@ -194,7 +303,9 @@ mod tests {
         with_appearance.appearance = Some(appearance());
         let with_appearance = Msg::State(with_appearance);
 
-        for msg in [hello, chat, bye, plain, with_appearance] {
+        let worn = Msg::Worn(worn());
+        let unworn = Msg::Unworn { id: peer(), root: 7 };
+        for msg in [hello, chat, bye, plain, with_appearance, worn, unworn] {
             assert_eq!(round_trip(&msg), Some(msg.clone()));
         }
     }
