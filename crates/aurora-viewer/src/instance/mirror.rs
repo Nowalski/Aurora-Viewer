@@ -29,6 +29,14 @@ pub struct Mirror {
     /// each of its prims (by its key), and the local ids of each linkset.
     thing_ids: HashMap<u32, (u32, Uuid)>,
     things: HashMap<u32, Vec<u32>>,
+    /// The latest message of each linkset and land row, to place them
+    /// again when the height offset changes.
+    thing_msgs: HashMap<u32, Worn>,
+    land_rows: std::collections::BTreeMap<u32, (u32, String)>,
+    /// Added to the heights of what the host's place shows (its land, its
+    /// linksets, its people): the visit puts the host's ground at ours where
+    /// we meet, whatever height each stands at in its own region.
+    offset_z: f32,
 }
 
 struct Peer {
@@ -78,6 +86,9 @@ impl Mirror {
             next_local_id: FIRST_LOCAL_ID,
             thing_ids: HashMap::new(),
             things: HashMap::new(),
+            thing_msgs: HashMap::new(),
+            land_rows: Default::default(),
+            offset_z: 0.0,
         }
     }
 
@@ -94,7 +105,12 @@ impl Mirror {
             Msg::Unworn { id, root } => self.unworn(*id, *root, handle),
             Msg::Thing(thing) => self.thing(thing, handle),
             Msg::Gone { root, .. } => self.gone(*root, handle),
-            Msg::Terrain { row, size_x, heights, .. } => super::place::terrain_event(handle, *row, *size_x, heights).into_iter().collect(),
+            Msg::Terrain { row, size_x, heights, .. } => {
+                self.land_rows.insert(*row, (*size_x, heights.clone()));
+                super::place::terrain_event(handle, *row, *size_x, heights, self.offset_z)
+                    .into_iter()
+                    .collect()
+            }
         }
     }
 
@@ -102,6 +118,9 @@ impl Mirror {
     pub fn clear_place(&mut self, handle: RegionHandle) -> Vec<NetEvent> {
         let local_ids: Vec<u32> = self.things.drain().flat_map(|(_, l)| l).collect();
         self.thing_ids.clear();
+        self.thing_msgs.clear();
+        self.land_rows.clear();
+        self.offset_z = 0.0;
         if local_ids.is_empty() {
             Vec::new()
         } else {
@@ -115,11 +134,45 @@ impl Mirror {
         self.peers.clear();
         local_ids.extend(self.things.drain().flat_map(|(_, l)| l));
         self.thing_ids.clear();
+        self.thing_msgs.clear();
+        self.land_rows.clear();
+        self.offset_z = 0.0;
         if local_ids.is_empty() {
             Vec::new()
         } else {
             vec![NetEvent::ObjectsKilled { handle, local_ids }]
         }
+    }
+
+    /// Place the host's place `dz` higher than it stands in the host's
+    /// region: its land and linksets again now, its people at their next
+    /// state.
+    pub fn set_offset_z(&mut self, dz: f32, handle: RegionHandle) -> Vec<NetEvent> {
+        if !dz.is_finite() || (dz - self.offset_z).abs() < 0.01 {
+            return Vec::new();
+        }
+        self.offset_z = dz;
+        let mut events: Vec<NetEvent> = self
+            .land_rows
+            .iter()
+            .filter_map(|(row, (size_x, heights))| super::place::terrain_event(handle, *row, *size_x, heights, dz))
+            .collect();
+        let things: Vec<Worn> = self.thing_msgs.values().cloned().collect();
+        for thing in &things {
+            events.extend(self.thing(thing, handle));
+        }
+        events
+    }
+
+    /// The height added to the host's place.
+    pub fn offset_z(&self) -> f32 {
+        self.offset_z
+    }
+
+    /// Where a peer stands in the host's region, as it sent it.
+    pub fn position_of(&self, id: &Uuid) -> Option<Vec3> {
+        let peer = self.peers.get(id).filter(|p| p.object)?;
+        Some(peer.position - Vec3::Z * self.offset_z)
     }
 
     /// Whether `id` is shown by the instance (rather than by the region).
@@ -173,7 +226,7 @@ impl Mirror {
         let Some(peer) = self.peers.get_mut(&s.id) else {
             return Vec::new();
         };
-        let position = finite_vec(s.pos);
+        let position = finite_vec(s.pos) + Vec3::Z * self.offset_z;
         let rotation = finite_rotation(s.rot);
         let velocity = finite_vec(s.vel);
         peer.position = position;
@@ -306,6 +359,7 @@ impl Mirror {
     /// parent is none). It carries no rights here: the host owns nothing
     /// we could edit, copy or take, as for any object of someone else.
     fn thing(&mut self, thing: &Worn, handle: RegionHandle) -> Vec<NetEvent> {
+        self.thing_msgs.insert(thing.root, thing.clone());
         let mut objects = Vec::with_capacity(thing.prims.len());
         let mut locals = Vec::with_capacity(thing.prims.len());
         let mut root_local = None;
@@ -317,7 +371,11 @@ impl Mirror {
                 (local, Uuid::new_v4())
             });
             match prim_update(p, local_id, full_id, root_local.unwrap_or(0), thing.id) {
-                Some(update) => {
+                Some(mut update) => {
+                    // the root stands in the region; the children follow it
+                    if root_local.is_none() {
+                        update.position.z += self.offset_z;
+                    }
                     objects.push(update);
                     locals.push(local_id);
                     root_local.get_or_insert(local_id);
@@ -339,6 +397,7 @@ impl Mirror {
     }
 
     fn gone(&mut self, root: u32, handle: RegionHandle) -> Vec<NetEvent> {
+        self.thing_msgs.remove(&root);
         match self.things.remove(&root) {
             Some(local_ids) if !local_ids.is_empty() => {
                 self.thing_ids.retain(|_, (l, _)| !local_ids.contains(l));
@@ -693,6 +752,18 @@ mod tests {
             ),
             1
         );
+        // raised to meet our ground: the root again, 5 m higher
+        let raised = m.set_offset_z(5.0, HANDLE);
+        let z: Vec<f32> = raised
+            .iter()
+            .filter_map(|e| match e {
+                NetEvent::ObjectUpdates { objects, .. } => Some(objects.iter().map(|o| o.position.z)),
+                _ => None,
+            })
+            .flatten()
+            .collect();
+        assert_eq!(z, vec![5.0]);
+        assert!(m.set_offset_z(5.0, HANDLE).is_empty());
         let cleared = m.clear_place(HANDLE);
         assert_eq!(
             count(

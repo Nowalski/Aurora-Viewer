@@ -35,6 +35,20 @@ pub fn hosting() -> bool {
     HOSTING.load(Ordering::Relaxed)
 }
 
+/// How long after the move to the meeting point our height is read: the
+/// local teleport and the landing are over by then.
+const ARRIVAL_SETTLE: Duration = Duration::from_secs(4);
+
+/// A visit's meeting point: where the host stood when it invited us (or,
+/// through a portal, where it stands when its place comes in). We move
+/// there inside our own region, then the host's place is raised or lowered
+/// so its ground meets ours there.
+enum Arrival {
+    Waiting,
+    Moving { target: Vec3, since: Instant },
+    Done,
+}
+
 /// How this viewer takes part.
 enum Link {
     /// Hosting: the hub, the people of our place and the place itself.
@@ -46,8 +60,12 @@ enum Link {
 
 /// What the environment asks for, read once at startup.
 pub enum Request {
-    Host { bind: String, port: u16 },
-    Join(String),
+    Host {
+        bind: String,
+        port: u16,
+    },
+    /// With the meeting point of an accepted invitation.
+    Join(String, Option<Vec3>),
     DemoPeer,
 }
 
@@ -64,7 +82,7 @@ impl Request {
             };
         }
         if let Ok(address) = std::env::var("AURORA_INSTANCE_JOIN") {
-            return Some(Request::Join(address.trim().to_string()));
+            return Some(Request::Join(address.trim().to_string(), None));
         }
         (demo && std::env::var("AURORA_DEMO_INSTANCE").is_ok_and(|v| v == "peer")).then_some(Request::DemoPeer)
     }
@@ -90,6 +108,10 @@ pub struct Instance {
     region_shows: std::collections::HashSet<Uuid>,
     /// A guest seeing the host's place instead of its own.
     visit: Option<place::Visit>,
+    meet: Option<Vec3>,
+    arrival: Arrival,
+    /// The move inside our own region the app is to make.
+    local_teleport: Option<Vec3>,
     /// What the app is to hide of our place (id, is an avatar), and to show
     /// again, while and after we visit.
     hide: Vec<(Uuid, bool)>,
@@ -118,6 +140,7 @@ impl Instance {
         };
         let mut advertised = None;
         let mut joined = None;
+        let mut meet = None;
         let (link, text) = match request {
             Request::Host { bind, port } => match hub::Hub::start(&bind, port) {
                 Ok(hub) => {
@@ -147,8 +170,9 @@ impl Instance {
                     );
                 }
             },
-            Request::Join(address) => match client::Client::connect(&address) {
+            Request::Join(address, at) => match client::Client::connect(&address) {
                 Ok(client) => {
+                    meet = at;
                     client.send(hello);
                     joined = Some(address.clone());
                     (Link::Guest(client), aurora_i18n::tr!("instance-joined", address = address.as_str()))
@@ -176,6 +200,9 @@ impl Instance {
             joined,
             region_shows: Default::default(),
             visit: None,
+            meet,
+            arrival: Arrival::Waiting,
+            local_teleport: None,
             hide: Vec::new(),
             show: Vec::new(),
         };
@@ -188,7 +215,11 @@ impl Instance {
         let Some(handle) = world.main().map(|r| r.handle) else {
             return Vec::new();
         };
-        let state = self.capture.state(world, self.peer_id, now);
+        let mut state = self.capture.state(world, self.peer_id, now);
+        // visiting: our height in the host's place, not in our region
+        if let Some(s) = &mut state {
+            s.pos[2] -= self.mirror.offset_z();
+        }
         // (after our first state, so the peers have our avatar to hang it on)
         let own_worn = match world.objects.index_of_uuid(&world.agent_id).and_then(|i| world.objects.get(i)) {
             Some(avatar) if self.capture.started() => self.worn.messages(world, self.peer_id, avatar, now),
@@ -287,6 +318,9 @@ impl Instance {
         {
             events.extend(self.end_visit(handle));
         }
+        if let Some(host) = self.visit.as_ref().map(|v| v.host) {
+            events.extend(self.arrive(world, host, handle, now));
+        }
         if let Some(visit) = &mut self.visit {
             let mirror = &self.mirror;
             let region_shows = &self.region_shows;
@@ -306,11 +340,52 @@ impl Instance {
         events
     }
 
+    /// The meeting point of a visit: once known, the move there; once we
+    /// stand there, the height of the host's place.
+    fn arrive(&mut self, world: &World, host: Uuid, handle: aurora_net::RegionHandle, now: Instant) -> Vec<NetEvent> {
+        match self.arrival {
+            Arrival::Waiting => {
+                let Some(at) = self.meet.or_else(|| self.mirror.position_of(&host)) else {
+                    return Vec::new();
+                };
+                let (w, h) = world
+                    .main()
+                    .map_or((256.0, 256.0), |r| (r.heightmap.size_x as f32, r.heightmap.size_y as f32));
+                let (x, y) = (at.x.clamp(0.5, w - 0.5), at.y.clamp(0.5, h - 0.5));
+                // onto our own ground there, so we do not fall from the
+                // host's height (a skybox) for long
+                let ground = self.visit.as_ref().and_then(|v| v.own_ground(x, y)).unwrap_or(at.z);
+                let target = Vec3::new(x, y, ground + 1.0);
+                log::info!("shared instance: moving to the meeting point ({x:.0}, {y:.0})");
+                self.local_teleport = Some(target);
+                self.arrival = Arrival::Moving { target: at, since: now };
+                Vec::new()
+            }
+            Arrival::Moving { target, since } => {
+                if now.duration_since(since) < ARRIVAL_SETTLE || world.teleporting {
+                    return Vec::new();
+                }
+                self.arrival = Arrival::Done;
+                let dz = world.agent.position.z - target.z;
+                log::info!("shared instance: the host's place is {dz:.1} m higher here");
+                self.mirror.set_offset_z(dz, handle)
+            }
+            Arrival::Done => Vec::new(),
+        }
+    }
+
+    /// The move to a visit's meeting point, inside our own region, once.
+    pub fn take_local_teleport(&mut self) -> Option<Vec3> {
+        self.local_teleport.take()
+    }
+
     /// Stop visiting: the host's place goes, ours comes back.
     fn end_visit(&mut self, handle: aurora_net::RegionHandle) -> Vec<NetEvent> {
         let Some(visit) = self.visit.take() else {
             return Vec::new();
         };
+        self.arrival = Arrival::Waiting;
+        self.local_teleport = None;
         let (show, land) = visit.end(handle);
         self.show.extend(show);
         let mut events = self.mirror.clear_place(handle);

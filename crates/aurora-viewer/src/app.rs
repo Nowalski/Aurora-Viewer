@@ -2091,7 +2091,7 @@ impl App {
         // an invitation accepted: leave the instance we are in, join that one
         // (a visit: we stay where we are in SL, the host's place is shown)
         if let Some(invitation) = self.world.teleport_invites.take_instance_accepted() {
-            self.join_instance(invitation.address);
+            self.join_instance(invitation.address, Some(glam::Vec3::from_array(invitation.pos)));
         }
         if let Some(request) = self.instance_request.take() {
             let (instance, notice) = crate::instance::Instance::start(request, &self.world, self.demo, now);
@@ -2104,8 +2104,17 @@ impl App {
         for event in instance.tick(&self.world, now) {
             self.world.apply(event);
         }
+        let local_teleport = instance.take_local_teleport();
         let (hide, show) = instance.take_visibility();
         self.apply_instance_visibility(hide, show);
+        // to a visit's meeting point, inside our own region (its screen and
+        // RLVa's checks as for any teleport; no region change)
+        if let Some(pos) = local_teleport {
+            let here = self.world.region_name();
+            if !self.teleport_to_location(here, pos) {
+                log::info!("shared instance: the move to the meeting point was refused");
+            }
+        }
     }
 
     /// While we visit a shared place, ours is hidden like a temporary
@@ -2152,13 +2161,13 @@ impl App {
 
     /// Leave the instance we are in and join the one at `address` on the
     /// next step.
-    fn join_instance(&mut self, address: String) {
+    fn join_instance(&mut self, address: String, meet: Option<glam::Vec3>) {
         // already there (a portal crossed again)
         if self.instance.as_ref().and_then(|i| i.joined()) == Some(address.as_str()) {
             return;
         }
         self.leave_instance();
-        self.instance_request = Some(crate::instance::Request::Join(address));
+        self.instance_request = Some(crate::instance::Request::Join(address, meet));
     }
 
     /// World › Portal to my shared place: a portal four metres ahead that

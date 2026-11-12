@@ -123,12 +123,13 @@ fn terrain_rows(map: &crate::world::terrain::Heightmap, id: Uuid) -> Vec<Msg> {
 }
 
 /// A row of the host's land as the world's terrain patches (16 m each).
-pub fn terrain_event(handle: RegionHandle, row: u32, size_x: u32, heights: &str) -> Option<NetEvent> {
+/// `dz` raises it all (the visit's height offset).
+pub fn terrain_event(handle: RegionHandle, row: u32, size_x: u32, heights: &str, dz: f32) -> Option<NetEvent> {
     let bytes = STANDARD.decode(heights).ok()?;
     let values: Vec<f32> = bytes
         .chunks_exact(4)
         .map(|c| f32::from_le_bytes([c[0], c[1], c[2], c[3]]))
-        .map(|v| if v.is_finite() { v.clamp(-100.0, 4096.0) } else { 0.0 })
+        .map(|v| if v.is_finite() { v.clamp(-100.0, 4096.0) + dz } else { dz })
         .collect();
     let w = size_x as usize;
     if values.len() != w * 16 {
@@ -253,6 +254,16 @@ impl Visit {
         out
     }
 
+    /// The height of our own land at (`x`, `y`), as it was before the visit
+    /// drew the host's over it.
+    pub fn own_ground(&self, x: f32, y: f32) -> Option<f32> {
+        let land = self.land.as_ref()?;
+        let w = land.size_x as usize;
+        let h = land.heights.len().checked_div(w)?;
+        let (ix, iy) = (x.max(0.0) as usize, y.max(0.0) as usize);
+        land.heights.get(iy.min(h.checked_sub(1)?) * w + ix.min(w.checked_sub(1)?)).copied()
+    }
+
     /// The visit ends: what to show again, and our land as it was.
     pub fn end(self, handle: RegionHandle) -> (Vec<Uuid>, Option<NetEvent>) {
         log::info!("shared instance: back to our own place");
@@ -291,7 +302,7 @@ mod tests {
         let Msg::Terrain { row, size_x, heights, .. } = &rows[3] else {
             panic!("a terrain row");
         };
-        let Some(NetEvent::Terrain { patches, .. }) = terrain_event(7, *row, *size_x, heights) else {
+        let Some(NetEvent::Terrain { patches, .. }) = terrain_event(7, *row, *size_x, heights, 0.0) else {
             panic!("patches");
         };
         assert_eq!(patches.len(), 16);

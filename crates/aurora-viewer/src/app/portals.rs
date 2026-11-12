@@ -282,7 +282,7 @@ impl App {
         if creator != self.world.agent_id
             && let Some(address) = self.world.portals.instance_of(creator, portal.id)
         {
-            self.join_instance(address);
+            self.join_instance(address, None);
             return;
         }
         // Ordinary location teleports retain RLVa, maturity, map lookup,

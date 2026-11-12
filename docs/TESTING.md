@@ -208,7 +208,7 @@ place: the host streams its region's linksets (ids and shapes, as `Thing`
 lines) and its land, and the guest's own objects and people are hidden like a
 temporary derender ("Hidden while visiting a shared place" in the Asset
 blacklist), then shown again, with its own land, when it leaves or the link
-drops. The guest stays where it is in SL: only what it sees changes. In the
+drops. The guest stays in its own SL region: an accepted invitation moves it, inside that region, to where the host stood when it sent it (through a portal, to where the host stands), and the host's place is then raised or lowered so its ground meets the guest's there. In the
 demo both windows stand in the same plaza, so run the host with a few
 `AURORA_DEMO_CROWD` residents and rez or move something there, and look for it
 on the guest. While hosting, World › Portal to my shared place opens a
