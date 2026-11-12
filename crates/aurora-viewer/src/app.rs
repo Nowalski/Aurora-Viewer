@@ -411,6 +411,9 @@ pub struct App {
     instance_request: Option<crate::instance::Request>,
     instance: Option<crate::instance::Instance>,
     instance_env_read: bool,
+    /// When the world first had its region, for the demo invitation.
+    instance_since: Option<Instant>,
+    instance_demo_invite_sent: bool,
     native_anchor: crate::movement::movelock::Controller,
     anchor_stands: crate::ao::anchor::StandCheck,
     /// Keep the verified standing set through an asynchronous stand-up reply.
@@ -1580,6 +1583,8 @@ impl App {
             instance_request: None,
             instance: None,
             instance_env_read: false,
+            instance_since: None,
+            instance_demo_invite_sent: false,
             native_anchor: Default::default(),
             anchor_stands: Default::default(),
             anchor_pose: None,
@@ -2064,6 +2069,29 @@ impl App {
             return;
         }
         let now = Instant::now();
+        // AURORA_DEMO_INSTANCE_INVITE=<host:port>: a friend's invitation
+        // into that instance, a few seconds in (instance/invite.rs)
+        let since = *self.instance_since.get_or_insert(now);
+        if self.demo && !self.instance_demo_invite_sent && now.duration_since(since) > Duration::from_secs(4) {
+            self.instance_demo_invite_sent = true;
+            if let Some(event) = crate::instance::invite::demo_event(&self.world) {
+                self.world.apply(event);
+            }
+        }
+        // an invitation accepted: leave the instance we are in, join that one
+        if let Some(invitation) = self.world.teleport_invites.take_instance_accepted() {
+            if let Some(mut old) = self.instance.take() {
+                for event in old.leave(&self.world) {
+                    self.world.apply(event);
+                }
+            }
+            let arrival = crate::instance::Arrival {
+                host: invitation.host,
+                region: invitation.region,
+                fallback: glam::Vec3::from_array(invitation.pos),
+            };
+            self.instance_request = Some(crate::instance::Request::Join(invitation.address, Some(arrival)));
+        }
         if let Some(request) = self.instance_request.take() {
             let (instance, notice) = crate::instance::Instance::start(request, &self.world, self.demo, now);
             self.instance = instance;
@@ -2075,6 +2103,35 @@ impl App {
         for event in instance.tick(&self.world, now) {
             self.world.apply(event);
         }
+        // the teleport of an accepted invitation, like any other: its screen,
+        // RLVa's checks, and in the demo the local teleport
+        if let Some((region, pos)) = instance.take_teleport()
+            && !self.teleport_to_location(region, pos)
+        {
+            log::info!("shared instance: the teleport beside the host was refused");
+        }
+    }
+
+    /// Invite a friend into the instance we host (experimental): an
+    /// ordinary IM whose bucket holds the invitation.
+    fn invite_to_instance(&mut self, to: uuid::Uuid) {
+        if !self.world.social.is_friend(&to) || !self.world.rlva_can_offer_teleport(to) {
+            return;
+        }
+        let Some(invitation) = self.instance.as_ref().and_then(|i| i.invitation(&self.world)) else {
+            return;
+        };
+        let session = uuid::Uuid::from_u128(self.world.agent_id.as_u128() ^ to.as_u128());
+        self.send(NetCommand::SendImDialog {
+            to,
+            dialog: 0,
+            id: session,
+            message: aurora_i18n::tr!("instance-invite-message").into(),
+            bucket: invitation.to_bucket(),
+        });
+        let name = self.world.social.name_of(&to);
+        let notice = crate::instance::notice(aurora_i18n::tr!("instance-invite-sent", name = name.as_str()).to_string());
+        self.world.apply(notice);
     }
 
     fn send(&mut self, cmd: NetCommand) {

@@ -857,6 +857,7 @@ impl App {
                     self.send(c);
                 }
             }
+            CtxAction::InviteToInstance(id) => self.invite_to_instance(id),
             CtxAction::OfferTeleport(id) => {
                 if self.world.rlva_can_offer_teleport(id) {
                     self.contacts_ui.ask_teleport_offer(vec![id], &self.world.rlva_region_label());

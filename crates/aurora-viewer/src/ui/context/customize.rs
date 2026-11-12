@@ -304,6 +304,7 @@ fn action_key(action: &CtxAction) -> String {
         CtxAction::Call(..) => "Call",
         CtxAction::ShowHistory(..) => "ShowHistory",
         CtxAction::OfferTeleport(..) => "OfferTeleport",
+        CtxAction::InviteToInstance(..) => "InviteToInstance",
         CtxAction::AnswerTeleport { .. } => "AnswerTeleport",
         CtxAction::AnswerInventoryOffer { .. } => "AnswerInventoryOffer",
         CtxAction::Profile(..) => "Profile",

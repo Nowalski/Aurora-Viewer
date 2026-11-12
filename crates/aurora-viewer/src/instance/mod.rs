@@ -11,12 +11,14 @@ pub mod client;
 pub mod crowd;
 pub mod demo_peer;
 pub mod hub;
+pub mod invite;
 pub mod mirror;
 #[cfg(test)]
 mod tests;
 pub mod wire;
 pub mod worn;
 
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use aurora_net::{ChatMessage, ChatSourceType, ChatType, NetEvent};
@@ -24,6 +26,24 @@ use glam::Vec3;
 use uuid::Uuid;
 
 use crate::world::World;
+
+/// Whether this viewer hosts an instance now (the menus offer invitations).
+static HOSTING: AtomicBool = AtomicBool::new(false);
+
+pub fn hosting() -> bool {
+    HOSTING.load(Ordering::Relaxed)
+}
+
+/// How long the teleport of an accepted invitation waits for the host's
+/// own position before going to the one the invitation gave.
+const ARRIVAL_WAIT: Duration = Duration::from_secs(8);
+
+/// Where we go once in the instance of an accepted invitation.
+pub struct Arrival {
+    pub host: Uuid,
+    pub region: String,
+    pub fallback: Vec3,
+}
 
 /// How this viewer takes part.
 enum Link {
@@ -36,8 +56,12 @@ enum Link {
 
 /// What the environment asks for, read once at startup.
 pub enum Request {
-    Host { bind: String, port: u16 },
-    Join(String),
+    Host {
+        bind: String,
+        port: u16,
+    },
+    /// With an arrival when it comes from an accepted invitation.
+    Join(String, Option<Arrival>),
     DemoPeer,
 }
 
@@ -54,7 +78,7 @@ impl Request {
             };
         }
         if let Ok(address) = std::env::var("AURORA_INSTANCE_JOIN") {
-            return Some(Request::Join(address.trim().to_string()));
+            return Some(Request::Join(address.trim().to_string(), None));
         }
         (demo && std::env::var("AURORA_DEMO_INSTANCE").is_ok_and(|v| v == "peer")).then_some(Request::DemoPeer)
     }
@@ -71,6 +95,12 @@ pub struct Instance {
     worn: worn::WornSender,
     lost_reported: bool,
     started: Instant,
+    /// The address our invitations give (hosting only).
+    advertised: Option<String>,
+    /// An accepted invitation's arrival, until we know where to go.
+    arrival: Option<Arrival>,
+    /// The teleport the app is to make (region, position).
+    teleport: Option<(String, Vec3)>,
 }
 
 impl Instance {
@@ -93,9 +123,22 @@ impl Instance {
             id: peer_id,
             name: name.clone(),
         };
+        let mut advertised = None;
+        let mut arrival = None;
         let (link, text) = match request {
             Request::Host { bind, port } => match hub::Hub::start(&bind, port) {
                 Ok(hub) => {
+                    // AURORA_INSTANCE_ADVERTISE: the address friends reach us
+                    // at, when it is not the one we listen on
+                    let listen = if bind == "0.0.0.0" { "127.0.0.1" } else { bind.as_str() };
+                    advertised = Some(
+                        std::env::var("AURORA_INSTANCE_ADVERTISE")
+                            .ok()
+                            .map(|a| a.trim().to_owned())
+                            .filter(|a| !a.is_empty())
+                            .unwrap_or_else(|| format!("{listen}:{}", hub.port())),
+                    );
+                    HOSTING.store(true, Ordering::Relaxed);
                     let port = hub.port().to_string();
                     hub.send(hello);
                     (
@@ -111,8 +154,9 @@ impl Instance {
                     );
                 }
             },
-            Request::Join(address) => match client::Client::connect(&address) {
+            Request::Join(address, wanted) => match client::Client::connect(&address) {
                 Ok(client) => {
+                    arrival = wanted;
                     client.send(hello);
                     (Link::Guest(client), aurora_i18n::tr!("instance-joined", address = address.as_str()))
                 }
@@ -135,6 +179,9 @@ impl Instance {
             worn: worn::WornSender::default(),
             lost_reported: false,
             started: now,
+            advertised,
+            arrival,
+            teleport: None,
         };
         (Some(instance), notice(text))
     }
@@ -205,6 +252,7 @@ impl Instance {
         for msg in &incoming {
             events.extend(self.mirror.apply(msg, handle));
         }
+        self.arrive(&incoming, now);
         if let Link::Guest(client) = &self.link
             && !client.connected()
             && !self.lost_reported
@@ -215,6 +263,53 @@ impl Instance {
             events.push(notice(aurora_i18n::tr!("instance-connection-lost").to_string()));
         }
         events
+    }
+
+    /// An accepted invitation: once the host's position comes in (or after
+    /// a while, the invitation's), the teleport to stand beside it.
+    fn arrive(&mut self, incoming: &[wire::Msg], now: Instant) {
+        let Some(arrival) = &mut self.arrival else {
+            return;
+        };
+        for msg in incoming {
+            match msg {
+                // no host id in the invitation: the first Aurora peer is it
+                wire::Msg::Hello { id, .. } if arrival.host.is_nil() => arrival.host = *id,
+                wire::Msg::State(s) if s.id == arrival.host => {
+                    let beside = Vec3::from_array(s.pos) + Vec3::new(1.5, 0.0, 0.0);
+                    self.teleport = Some((arrival.region.clone(), beside));
+                    self.arrival = None;
+                    return;
+                }
+                _ => {}
+            }
+        }
+        if now.duration_since(self.started) > ARRIVAL_WAIT {
+            self.teleport = Some((arrival.region.clone(), arrival.fallback));
+            self.arrival = None;
+        }
+    }
+
+    /// The teleport an accepted invitation asks for, once.
+    pub fn take_teleport(&mut self) -> Option<(String, Vec3)> {
+        self.teleport.take()
+    }
+
+    /// An invitation into the instance we host, for a friend. `None` when we
+    /// do not host.
+    pub fn invitation(&self, world: &World) -> Option<invite::Invitation> {
+        let address = self.advertised.clone()?;
+        Some(invite::Invitation {
+            address,
+            host: self.peer_id,
+            region: world.region_name(),
+            pos: world.agent.position.to_array(),
+        })
+    }
+
+    /// Leave the instance: the peers' avatars go from the world.
+    pub fn leave(&mut self, world: &World) -> Vec<NetEvent> {
+        world.main().map(|r| self.mirror.clear(r.handle)).unwrap_or_default()
     }
 
     /// Our nearby chat goes to the peers too (channel 0 only: commands to
@@ -245,6 +340,9 @@ impl Instance {
 
 impl Drop for Instance {
     fn drop(&mut self) {
+        if matches!(self.link, Link::Host(..)) {
+            HOSTING.store(false, Ordering::Relaxed);
+        }
         let bye = wire::Msg::Bye { id: self.peer_id };
         match &self.link {
             Link::Host(hub, _) => hub.send(bye),
@@ -255,7 +353,7 @@ impl Drop for Instance {
 }
 
 /// A line of the nearby chat from the viewer itself.
-fn notice(message: String) -> NetEvent {
+pub fn notice(message: String) -> NetEvent {
     NetEvent::Chat(ChatMessage {
         from_name: String::new(),
         source_id: Uuid::nil(),

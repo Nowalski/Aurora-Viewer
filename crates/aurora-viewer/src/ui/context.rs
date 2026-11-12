@@ -348,6 +348,8 @@ pub enum CtxAction {
     /// a conversation, a resident or a group.
     ShowHistory(Option<Uuid>),
     OfferTeleport(Uuid),
+    /// Invite a friend into the shared instance we host (experimental).
+    InviteToInstance(Uuid),
     /// A button of a teleport card in a conversation (accept or not).
     AnswerTeleport {
         invite: u64,
@@ -836,6 +838,19 @@ fn avatar_menu_reporting(
             online && world.rlva_can_offer_teleport(id),
         ) {
             act(CtxAction::OfferTeleport(id));
+        }
+        // only while we host a shared instance, for a friend online
+        if crate::instance::hosting()
+            && friend.is_some()
+            && menu::item_if(
+                ui,
+                p,
+                "door-enter",
+                aurora_i18n::tr!("instance-invite-menu"),
+                online && world.rlva_can_offer_teleport(id),
+            )
+        {
+            act(CtxAction::InviteToInstance(id));
         }
     };
     let tp_to = |ui: &mut egui::Ui| {

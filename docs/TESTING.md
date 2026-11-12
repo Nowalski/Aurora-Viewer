@@ -166,6 +166,8 @@ Actual grid login and teleporting are performed by the human.
 | `AURORA_INSTANCE_JOIN=<host:port>` | Joins a shared instance hosted by another window |
 | `AURORA_INSTANCE_BIND=<address>` | Listen address of the host, `127.0.0.1` by default; `0.0.0.0` accepts other PCs on the LAN |
 | `AURORA_INSTANCE_NAME=<name>` | Name shown to the other windows; the agent's name, or `Guest xxxx` in demo |
+| `AURORA_INSTANCE_ADVERTISE=<host:port>` | Address the host's invitations give, when friends reach it elsewhere than where it listens |
+| `AURORA_DEMO_INSTANCE_INVITE=<host:port>` | The demo's first friend invites this window into that instance, 4 s in |
 | `AURORA_EMOJI_FONT=<path>` | Uses another emoji font than the built-in one (PNG bitmaps: CBDT or sbix) |
 | `AURORA_MAX_AVATARS`, `AURORA_MAX_COMPLEXITY`, `AURORA_AA`, `AURORA_SHADOWS`, `AURORA_PROJECTOR_SHADOWS` | Override these settings |
 | `AURORA_PROJECTOR_SHADOW_LIMIT=1..16` | Override the projector shadow budget (default 2) |
@@ -192,7 +194,13 @@ walking and dancing near the agent, with no network, for screenshots. The host
 also shares every other avatar of its region: start the host with
 `AURORA_DEMO_CROWD=20` (and the guest without it), and the guest sees the
 host's 20 extra residents, with their looks, where the host sees them; a
-resident the guest's own region already shows is not doubled.
+resident the guest's own region already shows is not doubled. Their
+attachments (no HUDs) and body textures come along. While hosting, a friend's
+menu in People has "Invite to my shared place": an IM whose bucket carries the
+invitation. To see the other side, start the second window with
+`AURORA_DEMO_INSTANCE_INVITE=127.0.0.1:7777` instead of `AURORA_INSTANCE_JOIN`:
+an invitation card comes from a demo friend, and Teleport joins the instance,
+then teleports next to the host with the usual teleport screen.
 
 **Saved graphics profiles (#1218).** `AURORA_DEMO_BARS=profiles` installs three
 demo profiles, including two with identical quality; add `AURORA_DEMO_OPTIONS=graphics` to inspect

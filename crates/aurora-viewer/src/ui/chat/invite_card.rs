@@ -64,6 +64,16 @@ fn texts(env: &LineEnv, line: &ChatLine, v: &Invite) -> Texts {
                 ),
             }
         }
+        InviteKind::Instance(_) => Texts {
+            title: aurora_i18n::tr!("instance-invite-title", from = name).into(),
+            place: None,
+            message: v.message.clone(),
+            question: None,
+            buttons: (
+                aurora_i18n::tr!("common-teleport-3").into(),
+                aurora_i18n::tr!("ui-notifications-decline").into(),
+            ),
+        },
         InviteKind::Request => Texts {
             title: aurora_i18n::tr!("world-teleport-invites-requests-a-teleport", from = name),
             place: None,

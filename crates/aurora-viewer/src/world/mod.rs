@@ -4623,6 +4623,13 @@ impl World {
         } else {
             im.from_name.clone()
         };
+        // a friend's invitation into a shared instance (experimental)
+        if im.dialog == 0
+            && let Some(invitation) = crate::instance::invite::Invitation::from_bucket(&im.binary_bucket)
+        {
+            self.on_instance_invite(im, &from, invitation);
+            return true;
+        }
         let before = self.notifications.last_id();
         let n = &mut self.notifications;
         match im.dialog {

@@ -60,6 +60,9 @@ pub enum InviteKind {
     Offer { lure: Uuid, place: Option<Place>, godlike: bool },
     /// The sender asks to come to us: "Yes" offers them a teleport.
     Request,
+    /// A friend invites us into their shared instance (experimental):
+    /// accepting joins it and teleports next to them.
+    Instance(crate::instance::invite::Invitation),
 }
 
 /// What the agent's content rating makes of a lure (process_improved_im):
@@ -125,6 +128,8 @@ pub struct TeleportInvites {
     out: Vec<NetCommand>,
     /// Grid cells whose region was asked from the map.
     asked: std::collections::HashSet<(u32, u32)>,
+    /// An instance invitation just accepted, for the app to join.
+    instance_accepted: Option<crate::instance::invite::Invitation>,
 }
 
 impl TeleportInvites {
@@ -164,6 +169,10 @@ impl TeleportInvites {
 
     pub fn take_commands(&mut self) -> Vec<NetCommand> {
         std::mem::take(&mut self.out)
+    }
+
+    pub fn take_instance_accepted(&mut self) -> Option<crate::instance::invite::Invitation> {
+        self.instance_accepted.take()
     }
 }
 
@@ -222,6 +231,33 @@ pub(super) fn agent_link(id: Uuid) -> String {
 }
 
 impl World {
+    /// An invitation into a friend's shared instance (experimental), in the
+    /// bucket of an ordinary IM: a card and an entry like a teleport offer,
+    /// answered the same way. Only a friend's counts, and RLVa's teleport
+    /// restrictions hold as for an offer; anything else is dropped.
+    pub(super) fn on_instance_invite(&mut self, im: &InstantMessage, from: &str, invitation: crate::instance::invite::Invitation) {
+        if !self.social.is_friend(&im.from_agent_id) || !self.rlva_can_accept_teleport(im.from_agent_id, false) {
+            log::info!("instance: invitation from {} dropped", im.from_agent_id);
+            return;
+        }
+        let invite = self.teleport_invites.push(
+            im.from_agent_id,
+            InviteKind::Instance(invitation),
+            im.message.clone(),
+            Rating::Allowed,
+        );
+        self.ui_sounds.push(UiSound::TeleportOffer);
+        let title = aurora_i18n::tr!("instance-invite-title", from = from.to_string());
+        self.add_card(im, ChatKind::Invite(invite), format!("{title}\n{}", im.message));
+        let data = Data::Lure {
+            from: im.from_agent_id,
+            invite,
+            change_rating: false,
+        };
+        let id = self.notifications.push(Kind::Teleport, title.to_string(), im.message.clone(), data);
+        self.set_invite_notification(invite, id);
+    }
+
     /// IM_LURE_USER (process_improved_im): a card in the conversation with
     /// the sender and an entry in the notification centre, Teleport /
     /// Decline, with where it leads (FIRE-6786), the TeleportOffered sound,
@@ -459,7 +495,11 @@ impl World {
                 bucket: Vec::new(),
             }],
             (InviteKind::Request, true) => vec![self.offer_teleport(vec![from], "")],
-            (InviteKind::Request, false) => Vec::new(),
+            (InviteKind::Request, false) | (InviteKind::Instance(_), false) => Vec::new(),
+            (InviteKind::Instance(invitation), true) => {
+                self.teleport_invites.instance_accepted = Some(invitation);
+                Vec::new()
+            }
         }
     }
 
