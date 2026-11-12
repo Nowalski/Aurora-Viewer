@@ -2329,6 +2329,11 @@ impl World {
         self.appearances.get(&self.agent_id).map(|(appearance, _)| appearance)
     }
 
+    /// Last appearance received for an avatar.
+    pub fn avatar_appearance(&self, avatar: &Uuid) -> Option<&AvatarAppearance> {
+        self.appearances.get(avatar).map(|(appearance, _)| appearance)
+    }
+
     /// Hover height of an avatar's last appearance (m).
     pub fn appearance_hover(&self, avatar: &Uuid) -> f32 {
         if *avatar == self.agent_id {

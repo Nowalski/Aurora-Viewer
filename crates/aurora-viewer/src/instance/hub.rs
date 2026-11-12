@@ -251,7 +251,7 @@ fn serve(shared: Arc<Shared>, conn: u64, stream: TcpStream, tx: Sender<Line>, ad
             }
             Some(pid) => {
                 // A guest speaks only for its own id, and says Hello once.
-                if msg.id() != pid || matches!(msg, Msg::Hello { .. }) {
+                if msg.id() != pid || matches!(msg, Msg::Hello { .. } | Msg::Present { .. }) {
                     continue;
                 }
                 let bye = matches!(msg, Msg::Bye { .. });
@@ -329,7 +329,7 @@ fn fanout(st: &mut State, line: &Line, except: Option<u64>) {
 /// Keeps what a new guest needs to see a peer. A Bye forgets the peer.
 fn remember(cache: &mut HashMap<Uuid, PeerCache>, msg: &Msg) {
     match msg {
-        Msg::Hello { id, .. } => cache.entry(*id).or_default().hello = Some(msg.clone()),
+        Msg::Hello { id, .. } | Msg::Present { id, .. } => cache.entry(*id).or_default().hello = Some(msg.clone()),
         Msg::State(s) => {
             let entry = cache.entry(s.id).or_default();
             if s.appearance.is_some() {

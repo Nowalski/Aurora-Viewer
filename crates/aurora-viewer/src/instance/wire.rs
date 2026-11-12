@@ -21,6 +21,12 @@ pub enum Msg {
         id: Uuid,
         name: String,
     },
+    /// Someone the host sees in its place (not an Aurora peer): shown to the
+    /// guests like a peer, without the joined / left notices.
+    Present {
+        id: Uuid,
+        name: String,
+    },
     State(PeerState),
     /// Nearby chat said by a peer (`chat_type`: 0 whisper, 1 normal, 2 shout).
     Chat {
@@ -37,7 +43,7 @@ pub enum Msg {
 impl Msg {
     pub fn id(&self) -> Uuid {
         match self {
-            Msg::Hello { id, .. } | Msg::Chat { id, .. } | Msg::Bye { id } => *id,
+            Msg::Hello { id, .. } | Msg::Present { id, .. } | Msg::Chat { id, .. } | Msg::Bye { id } => *id,
             Msg::State(s) => s.id,
         }
     }
@@ -100,7 +106,7 @@ pub fn valid(msg: &Msg) -> bool {
         return false;
     }
     match msg {
-        Msg::Hello { name, .. } => valid_name(name),
+        Msg::Hello { name, .. } | Msg::Present { name, .. } => valid_name(name),
         Msg::State(state) => valid_state(state),
         Msg::Chat { text, chat_type, .. } => !text.is_empty() && text.len() <= MAX_CHAT && *chat_type <= 2,
         Msg::Bye { .. } => true,

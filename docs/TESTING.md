@@ -188,7 +188,11 @@ nearby chat. Look for the other avatar walking and animating in each window,
 wearing the same look, its chat in nearby chat, and the "joined" and "left"
 notices when a window starts or stops. Only ids and small state cross the
 connection: no asset bytes. `AURORA_DEMO_INSTANCE=peer` simulates such a peer
-walking and dancing near the agent, with no network, for screenshots.
+walking and dancing near the agent, with no network, for screenshots. The host
+also shares every other avatar of its region: start the host with
+`AURORA_DEMO_CROWD=20` (and the guest without it), and the guest sees the
+host's 20 extra residents, with their looks, where the host sees them; a
+resident the guest's own region already shows is not doubled.
 
 **Saved graphics profiles (#1218).** `AURORA_DEMO_BARS=profiles` installs three
 demo profiles, including two with identical quality; add `AURORA_DEMO_OPTIONS=graphics` to inspect

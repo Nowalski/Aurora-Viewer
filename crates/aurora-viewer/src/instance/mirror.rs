@@ -36,6 +36,8 @@ struct Peer {
     velocity: Vec3,
     /// Animations last sent to the world; `None` before the first State.
     anims: Option<Vec<(Uuid, i32)>>,
+    /// An Aurora peer (joined / left notices), not someone of the host's place.
+    announced: bool,
 }
 
 impl Default for Mirror {
@@ -56,7 +58,8 @@ impl Mirror {
     /// (no Hello yet) gives nothing.
     pub fn apply(&mut self, msg: &Msg, handle: RegionHandle) -> Vec<NetEvent> {
         match msg {
-            Msg::Hello { id, name } => self.hello(*id, name),
+            Msg::Hello { id, name } => self.hello(*id, name, true),
+            Msg::Present { id, name } => self.hello(*id, name, false),
             Msg::State(state) => self.state(state, handle),
             Msg::Chat { id, text, chat_type } => self.chat(*id, text, *chat_type),
             Msg::Bye { id } => self.bye(*id, handle),
@@ -74,6 +77,11 @@ impl Mirror {
         }
     }
 
+    /// Whether `id` is shown by the instance (rather than by the region).
+    pub fn contains(&self, id: &Uuid) -> bool {
+        self.peers.contains_key(id)
+    }
+
     #[cfg(test)]
     pub fn len(&self) -> usize {
         self.peers.len()
@@ -84,14 +92,16 @@ impl Mirror {
         self.peers.is_empty()
     }
 
-    fn hello(&mut self, id: Uuid, name: &str) -> Vec<NetEvent> {
+    /// `notice`: an Aurora peer joining is announced; the people of the
+    /// host's place just appear, as they would on arrival.
+    fn hello(&mut self, id: Uuid, name: &str, notice: bool) -> Vec<NetEvent> {
         let name = clean_name(name);
         if let Some(peer) = self.peers.get_mut(&id) {
             // Repeated Hello: only the name may have changed.
             peer.name = name;
             return Vec::new();
         }
-        let notice = system_notice(aurora_i18n::tr!("instance-peer-joined", name = name.as_str()));
+        let joined = notice.then(|| system_notice(aurora_i18n::tr!("instance-peer-joined", name = name.as_str())));
         let local_id = self.next_local_id;
         self.next_local_id = self.next_local_id.wrapping_add(1);
         self.peers.insert(
@@ -104,9 +114,10 @@ impl Mirror {
                 rotation: Quat::IDENTITY,
                 velocity: Vec3::ZERO,
                 anims: None,
+                announced: notice,
             },
         );
-        vec![notice]
+        joined.into_iter().collect()
     }
 
     fn state(&mut self, s: &PeerState, handle: RegionHandle) -> Vec<NetEvent> {
@@ -194,7 +205,9 @@ impl Mirror {
                 local_ids: vec![peer.local_id],
             });
         }
-        events.push(system_notice(aurora_i18n::tr!("instance-peer-left", name = peer.name.as_str())));
+        if peer.announced {
+            events.push(system_notice(aurora_i18n::tr!("instance-peer-left", name = peer.name.as_str())));
+        }
         events
     }
 }
@@ -380,6 +393,24 @@ mod tests {
             panic!("chat expected");
         };
         assert_eq!(c.from_name, "Ada Lovelace");
+    }
+
+    #[test]
+    fn people_of_the_host_place_come_and_go_without_notices() {
+        let mut m = Mirror::new();
+        let id = Uuid::from_u128(77);
+        let present = Msg::Present {
+            id,
+            name: "Someone Resident".into(),
+        };
+        assert!(m.apply(&present, HANDLE).is_empty());
+        assert!(m.contains(&id));
+        let created = m.apply(&state(id, Vec::new()), HANDLE);
+        assert_eq!(count(&created, |e| matches!(e, NetEvent::ObjectUpdates { .. })), 1);
+        let gone = m.apply(&Msg::Bye { id }, HANDLE);
+        assert_eq!(count(&gone, |e| matches!(e, NetEvent::Chat(_))), 0);
+        assert_eq!(count(&gone, |e| matches!(e, NetEvent::ObjectsKilled { .. })), 1);
+        assert!(!m.contains(&id));
     }
 
     #[test]

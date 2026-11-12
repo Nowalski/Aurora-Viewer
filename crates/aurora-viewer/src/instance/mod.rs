@@ -8,6 +8,7 @@
 
 pub mod capture;
 pub mod client;
+pub mod crowd;
 pub mod demo_peer;
 pub mod hub;
 pub mod mirror;
@@ -25,7 +26,8 @@ use crate::world::World;
 
 /// How this viewer takes part.
 enum Link {
-    Host(hub::Hub),
+    /// Hosting: the hub, and the people of our place it shares.
+    Host(hub::Hub, crowd::Crowd),
     Guest(client::Client),
     /// AURORA_DEMO_INSTANCE=peer: a simulated peer, nothing on the network.
     Demo(Option<demo_peer::DemoPeer>),
@@ -93,7 +95,10 @@ impl Instance {
                 Ok(hub) => {
                     let port = hub.port().to_string();
                     hub.send(hello);
-                    (Link::Host(hub), aurora_i18n::tr!("instance-hosting", port = port.as_str()))
+                    (
+                        Link::Host(hub, crowd::Crowd::new()),
+                        aurora_i18n::tr!("instance-hosting", port = port.as_str()),
+                    )
                 }
                 Err(e) => {
                     let error = e.to_string();
@@ -139,9 +144,13 @@ impl Instance {
         let state = self.capture.state(world, self.peer_id, now);
         let mut incoming = Vec::new();
         match &mut self.link {
-            Link::Host(hub) => {
+            Link::Host(hub, crowd) => {
                 if let Some(state) = state {
                     hub.send(wire::Msg::State(state));
+                }
+                let mirror = &self.mirror;
+                for msg in crowd.messages(world, |id| mirror.contains(id), now) {
+                    hub.send(msg);
                 }
                 while let Some(msg) = hub.try_recv() {
                     incoming.push(msg);
@@ -171,7 +180,14 @@ impl Instance {
             }
         }
         let mut events = Vec::new();
-        for msg in incoming.iter().filter(|m| m.id() != self.peer_id) {
+        // Someone the region already shows us (we are in the host's place
+        // ourselves) stays the region's: the instance only adds who is missing.
+        let native = |id: &Uuid| !self.mirror.contains(id) && world.objects.index_of_uuid(id).is_some();
+        let incoming: Vec<_> = incoming
+            .into_iter()
+            .filter(|m| m.id() != self.peer_id && !native(&m.id()))
+            .collect();
+        for msg in &incoming {
             events.extend(self.mirror.apply(msg, handle));
         }
         if let Link::Guest(client) = &self.link
@@ -205,7 +221,7 @@ impl Instance {
             chat_type,
         };
         match &self.link {
-            Link::Host(hub) => hub.send(msg),
+            Link::Host(hub, _) => hub.send(msg),
             Link::Guest(client) => client.send(msg),
             Link::Demo(_) => {}
         }
@@ -216,7 +232,7 @@ impl Drop for Instance {
     fn drop(&mut self) {
         let bye = wire::Msg::Bye { id: self.peer_id };
         match &self.link {
-            Link::Host(hub) => hub.send(bye),
+            Link::Host(hub, _) => hub.send(bye),
             Link::Guest(client) => client.send(bye),
             Link::Demo(_) => {}
         }
