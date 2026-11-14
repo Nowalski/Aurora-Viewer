@@ -55,7 +55,7 @@ Fine handle drag (Shift) on a hand joint:
 - [x] `cargo fmt --check`, clippy `-D warnings` and `cargo test --workspace` on Linux: the new code is clean and every test passes except the already known `chat_log::import::tests::a_failure_leaves_the_file_as_it_was`, which fails only when the tests run as root.
 - [ ] `scripts/check.ps1` on Windows.
 - [x] More unit tests for the later rounds: a box dragged from under the lanes does not move the window; a right-click over the lanes drops the picked keys; Ctrl or Shift + click adds a joint in the animation editor and a plain click resets; joints selected together turn with the selected one and are keyed with it; the animation editor keeps its tool and Shift does not turn Rotate into Move; an edited joint's fields hold still while the shown pose only jitters; Shift during a handle drag is ten times finer without a jump; the Drafts list shows every draft in its place while switching; the animation editor's buttons only use icons the viewer embeds.
-- [x] Validated by the human in demo mode on 2026-11-14, over five test rounds: key picking (click, Ctrl, Shift, box, Ctrl+A, Esc, right-click), moving, copying and deleting picked keys, several joints edited together, Shift fine drags, R, the camera staying still, the Drafts menu and the panel's look. The .bvh round trip through Blender is left to the human.
+- [x] Validated by the human in demo mode on 2026-11-14, over five test rounds: a clip exported as .bvh, opened in Blender and imported back, key picking (click, Ctrl, Shift, box, Ctrl+A, Esc, right-click), moving, copying and deleting picked keys, several joints edited together, Shift fine drags, R, the camera staying still, the Drafts menu and the panel's look.
 
 ## Limits and follow-up
 
