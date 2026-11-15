@@ -3661,6 +3661,8 @@ impl App {
         self.place_confirm = None;
         self.places_ui.forget_question();
         self.url_confirm = None;
+        // an Auto-sort run's confirmed moves are kept for Undo and Resume
+        self.inventory_ui.flush_sorter();
         self.inventory_ui = Default::default();
         self.dual_inventory_ui = ui::inventory::InventoryUi::dual_pane();
         self.inventory_mutation_editor = None;
