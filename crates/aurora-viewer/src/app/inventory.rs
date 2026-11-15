@@ -348,14 +348,20 @@ impl App {
             self.inventory_pane(selection.window()).begin_delete(request, selection);
         }
         self.inventory_ui.pending_refresh.clone_from(&change.refresh);
+        // Keep an Auto-sort batch from selecting or renaming a folder it creates.
+        let select_folder = !self.inventory_ui.sorter_sending();
         let pane = self.inventory_pane(editor);
-        pane.created_selection = change.operations.iter().find_map(|op| {
-            if let aurora_net::inventory::operations::Operation::Folder { id, .. } = op {
-                Some(*id)
-            } else {
-                None
-            }
-        });
+        pane.created_selection = change
+            .operations
+            .iter()
+            .find_map(|op| {
+                if let aurora_net::inventory::operations::Operation::Folder { id, .. } = op {
+                    Some(*id)
+                } else {
+                    None
+                }
+            })
+            .filter(|_| select_folder);
         pane.message.clear();
         // RLVa judges a Delete's moves to the Trash as removals
         if delete {
