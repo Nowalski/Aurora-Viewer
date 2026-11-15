@@ -348,8 +348,8 @@ impl App {
             self.inventory_pane(selection.window()).begin_delete(request, selection);
         }
         self.inventory_ui.pending_refresh.clone_from(&change.refresh);
-        // Keep an Auto-sort batch from selecting or renaming a folder it creates.
-        let select_folder = !self.inventory_ui.sorter_sending();
+        // Match Auto-sort to this request without selecting its new folders.
+        let sorter_batch = self.inventory_ui.claim_sorter_request(request, &change);
         let pane = self.inventory_pane(editor);
         pane.created_selection = change
             .operations
@@ -361,7 +361,7 @@ impl App {
                     None
                 }
             })
-            .filter(|_| select_folder);
+            .filter(|_| !sorter_batch);
         pane.message.clear();
         // RLVa judges a Delete's moves to the Trash as removals
         if delete {
@@ -790,7 +790,7 @@ impl App {
         self.inventory_ui.finish_bulk_permissions(result.as_ref().err().map(String::as_str));
         self.dual_inventory_ui
             .finish_bulk_permissions(result.as_ref().err().map(String::as_str));
-        self.inventory_ui.finish_sorter(result.as_ref().err().map(String::as_str));
+        self.inventory_ui.finish_sorter(request, result.as_ref().err().map(String::as_str));
         self.inventory_ui
             .finish_delete(request, result.is_ok(), result.as_ref().is_ok_and(|reply| reply.moves_queued));
         self.dual_inventory_ui
