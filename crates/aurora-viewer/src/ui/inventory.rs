@@ -2506,7 +2506,7 @@ pub fn show(
     }
     context_catalog::process_deferred(inv, st, prefs, &facts, &mut actions);
     bulk_permissions::show(ctx, p, inv, st, world.agent_id, &mut actions);
-    sorter::show(ctx, p, inv, st, prefs, &facts.worn, &mut actions);
+    sorter::show(ctx, p, inv, st, prefs, &facts.worn, facts.agent, &mut actions);
     st.visible.clear();
     fetch_whole_inventory(inv, st);
     // Copied folders load their whole tree for the paste; once loaded, they
@@ -2813,7 +2813,16 @@ pub fn show(
             w.state.view = Default::default();
         }
         bulk_permissions::show(ctx, p, &mut world.inventory, &mut w.state, world.agent_id, &mut actions);
-        sorter::show(ctx, p, &mut world.inventory, &mut w.state, prefs, &facts.worn, &mut actions);
+        sorter::show(
+            ctx,
+            p,
+            &mut world.inventory,
+            &mut w.state,
+            prefs,
+            &facts.worn,
+            facts.agent,
+            &mut actions,
+        );
         if w.id != listings::PANEL {
             finish_hidden_rename(&world.inventory, &mut w.state, &mut actions);
         }
