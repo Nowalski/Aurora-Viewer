@@ -27,13 +27,14 @@ No for the editor features (the Legacy Viewer has no animation editor). The BVH 
 - **Animation editor panel:** the Bone page gets the interface's section header and icon buttons (Reset this bone, Reset pose) and a short hint line for the shortcuts; the footer's key, save, export and upload buttons all carry a filled Tabler icon the viewer embeds and share one width. The Drafts menu lists every draft at a fixed place with the open one ticked, instead of reshuffling on each switch. The bone picker is drawn wider and taller so its dots are easier to hit.
 - **Couple mode (animation editor, Clip page):**
   - Person B is a nearby resident who accepts the same consent as the Poser: the Clip page lists them with Ask, then Use as B. Only the user sees the pose.
-  - The editor works on one person at a time, with all its tools. The person set aside shows their own keys at the shared playhead, plus their edits not keyed yet. Each person has their own undo, and B starts from their rest pose with A's range, rate and settings.
-  - The timeline lists A's lanes, then B's, under each name ("Person B", the resident's name stays on the Clip page): A in violet, B in amber. A click on the other person's name or lanes edits them, and so does a click on one of their joint dots, with that joint picked. A drag over any timeline row moves the playhead.
-  - Person B can be moved on screen only (forward, left, up and turn in A's facing; Face to face; Reset), never in their animation, and stays where they stood when they became B even if they walk in-world. Avatar Studio's Hover lifts both people.
+  - **Mirror yourself**: a copy of the user's own avatar, with what they wear but not their HUDs, stands in as Person B, so a couple animation can be made alone. It is client-only (the preview objects' region, ids of its own), its shape and bakes are read from the user's, it has no name tag, menu, radar or minimap entry, nothing about it is sent, and it goes when couple mode ends.
+  - The editor works on one person at a time, with all its tools. The person set aside shows their own keys at the shared playhead, plus their edits not keyed yet. Each person has their own undo, and B starts from their rest pose with A's range, rate and settings. Range, rate, loop and ease set on one person carry over to the other (their keys stay).
+  - The timeline lists A's lanes, then B's, under each name ("Person B", the resident's name stays on the Clip page): A in violet, B in amber. A click on the other person's name or lanes edits them, and so does a click on one of their joint dots, with that joint picked; a click on B's body picks them where they are drawn. A drag over any timeline row moves the playhead.
+  - Person B can be moved on screen only (forward, left, up and turn in A's facing; Face to face; Reset), never in their animation, and stays where they stood when they became B even if they walk in-world. Avatar Studio's Hover lifts both people; its menu has a You / Person B choice to give B a hover of their own.
   - Save and Export .bvh write `<name> A`, `<name> B` and `<name> placement.txt` (B's position and turn in A's avatar space). Upload stays the edited person's own.
   - A partner who teleports away or logs off stays drawn, standing still, until couple mode ends; a withdrawn consent ends couple mode, and B's animation stays among the drafts.
   - The Ask list says why a request may not arrive: the partner must wear the bridge, stand in the region and allow the user in their posing privacy (Friends by default).
-  - Demo: `AURORA_DEMO_COUPLE=1` (a demo resident stands beside you and accepts), `=leave` (she teleports away 10 s after becoming Person B).
+  - Demo: `AURORA_DEMO_COUPLE=1` (a demo resident stands beside you and accepts), `=leave` (she teleports away 10 s after becoming Person B), `=clip|hover|mirror` (scripted, for screenshots).
 - **Fix found while testing couple mode on the grid:** a clip that keys no pelvis position (an imported .anim without hip motion) put the hips on the avatar's shaped rest pelvis, which a worn mesh's pelvis override can place metres up: the editing avatar rose about 10 m while such a clip played. It now stands where a zero pelvis key would, like a clip that keys the hips.
 - **Translations:** new and changed keys in English, French and Japanese.
 - **Second review (2026-11-16), after merging main:**
@@ -71,6 +72,22 @@ Fine handle drag (Shift) on a hand joint:
 
 ![fine move](https://raw.githubusercontent.com/Nowalski/Aurora-Viewer/captures/pr-3646/fine-move.gif)
 
+Couple mode, demo mode, 2026-11-16 (`AURORA_DEMO_COUPLE=clip`): Person A and Person B in one timeline, A in violet, B in amber, and the Move Person B fields:
+
+![couple mode](https://raw.githubusercontent.com/Nowalski/Aurora-Viewer/captures/pr-3646/couple-mode.png)
+
+Hover menu with its You / Person B choice, B given a hover of their own (`=hover`):
+
+![couple hover](https://raw.githubusercontent.com/Nowalski/Aurora-Viewer/captures/pr-3646/couple-hover.png)
+
+Mirror yourself as Person B (`=mirror`):
+
+![couple mirror](https://raw.githubusercontent.com/Nowalski/Aurora-Viewer/captures/pr-3646/couple-mirror.png)
+
+Mirror yourself on the grid, recorded by the human on 2026-11-16:
+
+![couple mirror on the grid](https://raw.githubusercontent.com/Nowalski/Aurora-Viewer/captures/pr-3646/couple-mirror-grid.gif)
+
 ## Tests
 
 - [x] New unit tests: a BVH exported from a clip imports back (`parse_bvh_for_edit`) to the same rotations and pelvis positions; its hierarchy is the rest skeleton without collision volumes, with a rest frame 0; an unknown joint is refused; angles never jump a full turn between frames. Group moves keep spacing, stop at frame 0, grow the range and do not replace each other; deleting picked keys keeps a draft's hidden rest keys; pick rules (click, Ctrl, Shift, drag); box hit-testing; an egui test that drags one of two picked keys and checks both move in one undo step; an egui test where Shift + drag from a key boxes keys without moving it; copy and paste of picked keys keep their spacing and values; Delete, Ctrl+A and Esc through the shortcut handler.
@@ -79,10 +96,11 @@ Fine handle drag (Shift) on a hand joint:
 - [x] More unit tests for the later rounds: a box dragged from under the lanes does not move the window; a right-click over the lanes drops the picked keys; Ctrl or Shift + click adds a joint in the animation editor and a plain click resets; joints selected together turn with the selected one and are keyed with it; the animation editor keeps its tool and Shift does not turn Rotate into Move; an edited joint's fields hold still while the shown pose only jitters; Shift during a handle drag is ten times finer without a jump, in the pose and animation editors only; the Drafts list shows every draft in its place while switching; the animation editor's buttons only use icons the viewer embeds.
 - [x] After the merge with main and the second review (2026-11-16): new unit tests `a_sixty_second_bvh_imports_back_at_every_frame_rate` and `a_group_drag_that_cannot_move_leaves_undo_and_redo_alone`, `every_other_way_of_selecting_a_joint_keeps_the_joints_picked_together_right`, `turning_a_joint_with_its_parent_picked_holds_steady_over_a_drag`, `a_new_animation_with_no_edit_yet_needs_no_base` and packed-key cases in the key hit test; `cargo fmt --check` clean; clippy on Linux reports nothing in the changed code; `cargo test --workspace` on Linux passes except `chat_log::import::tests::a_failure_leaves_the_file_as_it_was` and `transcripts::tests::the_conversation_log_follows_the_conversations`, which fail in the Linux test container in code this PR does not touch (`world/`). The human tested the first six fixes in demo mode on 2026-11-16 and reported the shaking rotate and the playhead snapping; after their fix the human confirmed the rotate holds steady, and validated the whole second review, the playhead and the first Animate press in demo mode on 2026-11-16.
 - [x] Couple mode and the pelvis fix (2026-11-16): new unit tests for the person swap (every part of the editing state goes with its person, the switch waits for the preview), the waiting person's sample at the shared playhead, ending couple mode, the placement note, the ruler drag in couple mode, a click on the other person's joint, the "Person B" label, the studio Hover lifting B but not the placement, B held in place while walking, and a clip without a pelvis key standing at the rig's pelvis height. Tested by the human in demo mode (`AURORA_DEMO_COUPLE`) and on the grid with a second account on 2026-11-16: consent, editing both people, moving B, import onto each person; the human confirmed the pelvis fix on the grid.
+- [x] Mirror yourself, shared timing, B's own hover and picking B where drawn (2026-11-16): unit tests for the mirror (a copy of the avatar and what it wears, not the HUDs, gone once removed), range/rate/loop/ease carried over, B's hover, and the click box at B's drawn spot. Mirror yourself tested by the human on the grid on 2026-11-16 (GIF above).
 - [x] Validated by the human in demo mode on 2026-11-14, over five test rounds: a clip exported as .bvh, opened in Blender and imported back, key picking (click, Ctrl, Shift, box, Ctrl+A, Esc, right-click), moving, copying and deleting picked keys, several joints edited together, Shift fine drags, R, the camera staying still, the Drafts menu and the panel's look.
 
 ## Limits and follow-up
 
 - A BVH has no place for priorities, loop points, ease, hand pose or expression: they stay in the .anim only.
 - A bone keyed at its rest rotation for the whole clip is not distinguishable from an unkeyed one in a BVH, so it does not come back as a track on re-import (its motion is unchanged).
-- Couple mode, later (⬜ in TASKS.md): a stand-in partner for animating alone; range, rate and loop changes on one person following on the other; B's click-picking in the world still uses where they really stand, not where they are drawn.
+- Couple mode: the mirror is a copy of what the user wore when it was made (later changes of outfit show on it only through the shape and bakes); a grid test with a second account of a partner who teleports away is still to do (⬜ in TASKS.md).
