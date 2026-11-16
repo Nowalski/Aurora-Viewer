@@ -24,6 +24,12 @@ No for the editor features (the Legacy Viewer has no animation editor). The BVH 
 - **Steady fields:** an edited joint's position and rotation fields no longer flicker while nothing changes (they were re-read from the shown pose every frame).
 - **Animation editor panel:** the Bone page gets the interface's section header and icon buttons (Reset this bone, Reset pose) and a short hint line for the shortcuts; the footer's key, save, export and upload buttons all carry a filled Tabler icon the viewer embeds and share one width. The Drafts menu lists every draft at a fixed place with the open one ticked, instead of reshuffling on each switch. The bone picker is drawn wider and taller so its dots are easier to hit.
 - **Translations:** new and changed keys in English, French and Japanese.
+- **Second review (2026-11-16), after merging main:**
+  - A 60 s clip exported as .bvh at 24, 36 or 60 fps imports back again: the frame time was rounded to six decimals, which made the file read as just over the 60 s the import (like `LLBVHLoader`) accepts. It is now floored, and the frames are sampled at that same step.
+  - A group drag that cannot move (a picked key already at frame 0, dragged left) no longer adds an empty undo step nor clears the redo history.
+  - A key of a lane the timeline no longer shows (a joint's hidden rest key picked with Ctrl+A while that joint was selected) leaves the pick, so a later group move cannot author a joint the user never keyed.
+  - A press on a limb pole handle no longer also turns Avatar Studio's camera, and in the animation editor a pole click drops the joints picked with another one instead of making them follow that limb.
+  - Joints moved together each get their move: one that an earlier follower's chain swung (a wrist picked with its elbow) was skipped.
 
 ## Screenshots
 
@@ -55,6 +61,7 @@ Fine handle drag (Shift) on a hand joint:
 - [x] `cargo fmt --check`, clippy `-D warnings` and `cargo test --workspace` on Linux: the new code is clean and every test passes except the already known `chat_log::import::tests::a_failure_leaves_the_file_as_it_was`, which fails only when the tests run as root.
 - [x] `scripts/check.ps1` on Windows (2026-11-14, at f42517ee): formatting, scripts, clippy `-D warnings` and the full workspace tests are green: 9,252 passed, 0 failed, 55 ignored.
 - [x] More unit tests for the later rounds: a box dragged from under the lanes does not move the window; a right-click over the lanes drops the picked keys; Ctrl or Shift + click adds a joint in the animation editor and a plain click resets; joints selected together turn with the selected one and are keyed with it; the animation editor keeps its tool and Shift does not turn Rotate into Move; an edited joint's fields hold still while the shown pose only jitters; Shift during a handle drag is ten times finer without a jump, in the pose and animation editors only; the Drafts list shows every draft in its place while switching; the animation editor's buttons only use icons the viewer embeds.
+- [x] After the merge with main and the second review (2026-11-16): new unit tests `a_sixty_second_bvh_imports_back_at_every_frame_rate` and `a_group_drag_that_cannot_move_leaves_undo_and_redo_alone`; `cargo fmt --check` clean; clippy on Linux reports nothing in the changed code; `cargo test --workspace` on Linux passes except `chat_log::import::tests::a_failure_leaves_the_file_as_it_was` and `transcripts::tests::the_conversation_log_follows_the_conversations`, which fail in the Linux test container in code this PR does not touch (`world/`). The second review's fixes are not yet validated by the human in demo mode.
 - [x] Validated by the human in demo mode on 2026-11-14, over five test rounds: a clip exported as .bvh, opened in Blender and imported back, key picking (click, Ctrl, Shift, box, Ctrl+A, Esc, right-click), moving, copying and deleting picked keys, several joints edited together, Shift fine drags, R, the camera staying still, the Drafts menu and the panel's look.
 
 ## Limits and follow-up
