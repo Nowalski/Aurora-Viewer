@@ -2192,6 +2192,7 @@ mod tests {
             &aurora_net::inventory::operations::Reply {
                 moved_items: Vec::new(),
                 moved_folders: Vec::new(),
+                unconfirmed: Vec::new(),
                 contents: Vec::new(),
                 folders: Vec::new(),
                 moves_queued: false,
