@@ -59,6 +59,7 @@ English.
 | Textures stay grey or blurry | Point at a grey face, press L1 and Copy, then J3 | L1, J3, N3 | The face's state, the last warnings | texture state, memory pressure, failed downloads |
 | Stutters or low frame rate | Turn P3 on, reproduce for 30 s, press J5; a screenshot of P1 | P3, J5, P1 | The slow frames and their step | which step peaks (sync, upload, GPU) |
 | Disconnects or rubber-banding | Open N1, reproduce, press N2 then J3 | N1, N2, J3 | The region summary, the warnings | losses, last packet, simulator version |
+| The inventory stops loading (the count stops rising, "loading folders…" stays) | Wait a minute, press N4, then J3 | N4, J3 | The loader's state, the warnings | `reading` and `not read yet` folders, reads in flight and the oldest's age, last answer, retries |
 | Media or sound does not play | Turn M1 on, retry, press J3 | M1, J3 | The media lines and warnings | plugin and media state |
 | Any report, first message | Press J4 once | J4 | Version, hardware, settings | build, GPU vendor and driver, settings |
 | A worn animesh, or a rigged attachment that should move, is bent, stretched, misplaced or stays still | Stand within 3 m of the wearer, or choose My avatar when you wear it (or select the item), press J9, then Copy | J9, J2 | The worn animesh's skin joints, overrides, control skeleton and animations | joints `unknown to the skeleton`, an override that wins over the expected mesh, `rest` vs `now` on keyed joints, position keys far from the rest, animations `signalled, not playing` |

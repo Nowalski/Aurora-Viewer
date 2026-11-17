@@ -113,7 +113,7 @@ const TOOLS: &[Tool] = &[
     t("O10", K::Toggle, "dimensions", G::Objects),
     t("N1", K::Window, "chart-line", G::Network),
     t("N2", K::Copy, "world-filled", G::Network),
-    t("N4", K::Copy, "folders-filled", G::Network),
+    t("N4", K::Copy, "briefcase-filled", G::Network),
     t("P1", K::Window, "gauge-filled", G::Network),
     t("P2", K::Window, "heart-rate-monitor", G::Network),
     t("P3", K::Toggle, "hourglass-filled", G::Network),
