@@ -924,6 +924,41 @@
    "name": "Silk Pajama Set",
    "type": 6,
    "expect": "{sleepwear}"
+  },
+  {
+   "name": "Body Vitiligo - Full Body - Tint",
+   "type": 6,
+   "expect": "{skins}"
+  },
+  {
+   "name": "Angry Nose Tape - Black",
+   "type": 6,
+   "expect": "{accessories}"
+  },
+  {
+   "name": "Pumpkin Phone Case BOX (Add Me)",
+   "type": 6,
+   "expect": "{accessories}"
+  },
+  {
+   "name": "Hula Hoop [Add Me]",
+   "type": 6,
+   "expect": "{accessories}"
+  },
+  {
+   "name": "Floral Bouquet Vines - White",
+   "type": -1,
+   "expect": "{decor}"
+  },
+  {
+   "name": "Fortune Teller Circus Tent",
+   "type": 6,
+   "expect": "{decor}"
+  },
+  {
+   "name": "Circus Tent Canvas",
+   "type": 0,
+   "expect": "{textures}"
   }
  ]
 }
