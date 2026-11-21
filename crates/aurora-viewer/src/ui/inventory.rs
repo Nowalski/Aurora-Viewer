@@ -2363,8 +2363,8 @@ pub fn show(
     // What is worn, the attachment points and the names are read for the
     // windows and dialogs that show them, not every frame while closed.
     let shown = *open
-        || dual.is_some()
         || st.sorter.active()
+        || dual.is_some()
         || st.dialog.is_some()
         || st.move_to.is_some()
         || st.demo_menu.is_some()

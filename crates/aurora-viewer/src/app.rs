@@ -3663,6 +3663,7 @@ impl App {
         self.url_confirm = None;
         // an Auto-sort run's confirmed moves are kept for Undo and Resume
         self.inventory_ui.flush_sorter();
+        self.dual_inventory_ui.flush_sorter();
         self.inventory_ui = Default::default();
         self.dual_inventory_ui = ui::inventory::InventoryUi::dual_pane();
         self.inventory_mutation_editor = None;
@@ -7281,6 +7282,7 @@ impl App {
         // an Auto-sort run's confirmed moves and its run to resume, written
         // before the viewer goes
         self.inventory_ui.flush_sorter();
+        self.dual_inventory_ui.flush_sorter();
         self.inventory_ui.wait_for_sorter_writes();
         self.record_inventory_logout();
         // revertBeaconsState when the editors close with the viewer

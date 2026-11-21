@@ -348,8 +348,12 @@ impl App {
             self.inventory_pane(selection.window()).begin_delete(request, selection);
         }
         self.inventory_ui.pending_refresh.clone_from(&change.refresh);
-        // Match Auto-sort to this request without selecting its new folders.
-        let sorter_batch = self.inventory_ui.claim_sorter_request(request, &change);
+        // An Auto-sort batch is recognised by its moves and takes this request's
+        // id: its result is matched to it, and its new folders are neither
+        // shown nor renamed like a "New folder".
+        // (the dual panel's own Auto-sort window too)
+        let sorter_batch =
+            self.inventory_ui.claim_sorter_request(request, &change) || self.dual_inventory_ui.claim_sorter_request(request, &change);
         let pane = self.inventory_pane(editor);
         pane.created_selection = change
             .operations
@@ -792,8 +796,6 @@ impl App {
             result => result,
         };
         self.inventory_ui.finish_bulk_permissions(result.as_ref().err().map(String::as_str));
-        self.dual_inventory_ui
-            .finish_bulk_permissions(result.as_ref().err().map(String::as_str));
         // moves the server did not show at their place: the batch is
         // answered as refused (its entries counted once seen there)
         let unconfirmed = result
@@ -814,11 +816,13 @@ impl App {
                     .collect()
             },
         );
-        self.inventory_ui.finish_sorter(
-            request,
-            result.as_ref().err().map(String::as_str).or(unconfirmed),
-            result.is_ok().then_some(unread.as_slice()),
-        );
+        let error = result.as_ref().err().map(String::as_str).or(unconfirmed);
+        self.inventory_ui
+            .finish_sorter(request, error, result.is_ok().then_some(unread.as_slice()));
+        self.dual_inventory_ui
+            .finish_sorter(request, error, result.is_ok().then_some(unread.as_slice()));
+        self.dual_inventory_ui
+            .finish_bulk_permissions(result.as_ref().err().map(String::as_str));
         self.inventory_ui
             .finish_delete(request, result.is_ok(), result.as_ref().is_ok_and(|reply| reply.moves_queued));
         self.dual_inventory_ui

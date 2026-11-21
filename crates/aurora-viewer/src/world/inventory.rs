@@ -66,12 +66,12 @@ pub struct Inventory {
     /// limit (the Legacy Viewer's InventoryLimitReachedAIS). Their direct
     /// items cannot be read; search and refresh do not ask again in a loop.
     pub too_big: HashSet<Uuid>,
-    /// When each folder's last read failed (`shown_needs_fetch`).
-    pub(crate) failed_at: HashMap<Uuid, std::time::Instant>,
     /// The background walk still has reads queued, on their way or waiting
     /// to be tried again (set each frame it is pumped): what is not read
     /// yet may still come.
     pub walk_busy: bool,
+    /// When each folder's last read failed (`shown_needs_fetch`).
+    pub(crate) failed_at: HashMap<Uuid, std::time::Instant>,
     /// Failed item reads (network, server error), by attempt.
     pub item_failures: HashMap<Uuid, u8>,
     /// Failed item reads to ask for again (`take_item_retries`).
