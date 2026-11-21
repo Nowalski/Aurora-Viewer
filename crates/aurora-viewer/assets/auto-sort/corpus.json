@@ -959,6 +959,36 @@
    "name": "Circus Tent Canvas",
    "type": 0,
    "expect": "{textures}"
+  },
+  {
+   "name": "Rustic Wood Stove",
+   "type": 6,
+   "expect": "{furniture}"
+  },
+  {
+   "name": "Winter Wolf Rideable",
+   "type": 6,
+   "expect": "{pets}"
+  },
+  {
+   "name": "Fieldstone Archway",
+   "type": -1,
+   "expect": "{decor}"
+  },
+  {
+   "name": "Overgrown Brick Texture Set",
+   "type": -1,
+   "expect": "{textures}"
+  },
+  {
+   "name": "Celestial Bodychain",
+   "type": 6,
+   "expect": "{jewelry}"
+  },
+  {
+   "name": "Side Gash BOM",
+   "type": 6,
+   "expect": "{tattoos}"
   }
  ]
 }

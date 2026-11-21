@@ -5073,6 +5073,86 @@ fn opaque_script_deliveries_use_native_payload_and_keep_the_guide() {
 }
 
 #[test]
+fn paired_brow_variants_identify_a_skin_delivery() {
+    let mut inv = fixture(&[]);
+    add_folder(&mut inv, 90, OBJECTS, "[Moss Vale] Haven Studio FATPACK");
+    add_folder(&mut inv, 91, OBJECTS, "[Moss Vale] Silk Collection FATPACK");
+    for (index, tone) in ["Icy", "Dune", "Valley"].into_iter().enumerate() {
+        for (offset, variant) in ["BROW", "NB"].into_iter().enumerate() {
+            let entry = 200 + (index * 2 + offset) as u128;
+            add_typed(
+                &mut inv,
+                entry,
+                90,
+                &format!("[Moss Vale] Haven Palette {tone} [{variant}]"),
+                NEW,
+                5,
+            );
+            inv.items.get_mut(&id(entry)).expect("wearable").flags = 14;
+            add_item(&mut inv, entry + 10, 91, &format!("[Moss Vale] Silk Dress {tone} [{variant}]"), NEW);
+        }
+    }
+    add_typed(&mut inv, 220, 90, "How to wear", NEW, 7);
+    assert!(skin_tone_pack(&inv, &inv.folders[&id(90)]));
+    assert!(!skin_tone_pack(&inv, &inv.folders[&id(91)]));
+    let none = HashSet::new();
+    let prefs = Preferences::default();
+    assert!(product_folder_in(&inv, id(90), &sorter_folder_names(&prefs)));
+    assert_eq!(
+        target_from_items(&inv, id(90), &prefs, None, false),
+        Some(Dest::Path(vec![category_folder(Category::Skins)]))
+    );
+    for planned in [
+        plan_whole(&inv, &prefs, &none, &none),
+        plan(&inv, id(OBJECTS), &prefs, &none, &none),
+    ] {
+        assert!(
+            planned
+                .moves
+                .iter()
+                .any(|m| m.id == id(90) && m.folder && m.to == Dest::Path(vec![category_folder(Category::Skins)])),
+            "moves: {:?}, unknown: {:?}",
+            planned.moves,
+            planned.unknown
+        );
+        assert!(planned.moves.iter().all(|m| !(200..206).any(|entry| m.id == id(entry))));
+    }
+}
+
+#[test]
+fn related_skin_tone_ranges_move_as_one_delivery() {
+    let mut inv = fixture(&[]);
+    add_folder(&mut inv, 90, OBJECTS, "[Moss Vale] Haven Fantasy FP");
+    for (range_index, range) in ["Warm", "Cool"].into_iter().enumerate() {
+        let folder = 91 + range_index as u128;
+        add_folder(&mut inv, folder, 90, &format!("[Moss Vale] Haven {range} FATPACK"));
+        for (tone_index, tone) in ["Icy", "Dune", "Valley"].into_iter().enumerate() {
+            for (variant_index, variant) in ["Brow", "No Brows"].into_iter().enumerate() {
+                let entry = 200 + (range_index * 6 + tone_index * 2 + variant_index) as u128;
+                add_item(
+                    &mut inv,
+                    entry,
+                    folder,
+                    &format!("[Moss Vale] Haven {range} {tone} [{variant}]"),
+                    NEW,
+                );
+            }
+        }
+    }
+    add_item(&mut inv, 220, 90, "[Moss Vale] Haven Shape", NEW);
+    add_typed(&mut inv, 221, 90, "How to wear", NEW, 7);
+    assert!(skin_tone_delivery(&inv, &inv.folders[&id(90)]));
+    let none = HashSet::new();
+    let planned = plan_whole(&inv, &Preferences::default(), &none, &none);
+    assert_eq!(planned.moves.len(), 1, "{:?}", planned.moves);
+    assert_eq!(planned.moves[0].id, id(90));
+    assert_eq!(planned.moves[0].to, Dest::Path(vec![category_folder(Category::Skins)]));
+
+    inv.folders.get_mut(&id(92)).expect("range").info.name = "[Moss Vale] Sunbeam FATPACK".into();
+    assert!(!skin_tone_delivery(&inv, &inv.folders[&id(90)]));
+}
+
+#[test]
 fn sorter_uses_wearable_types_without_guessing_from_opaque_product_titles() {
     for flags in [13, 15, 16] {
         assert_eq!(classify("Untitled layer", 5, flags).category, Some(Category::BodyAddons));

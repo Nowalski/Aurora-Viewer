@@ -2060,6 +2060,9 @@ fn judge_product_folder(inv: &Inventory, folder: Uuid, reserved: &HashSet<String
     if f.info.type_default != -1 || reserved.contains(&name.to_lowercase()) {
         return false;
     }
+    if skin_tone_delivery(inv, f) {
+        return true;
+    }
     let has_folders = f.children.iter().any(|c| inv.folders.contains_key(c));
     if has_folders && shelf_of_products(inv, f, name, reserved) {
         return false;
@@ -4758,6 +4761,96 @@ fn modular_floor(root: &super::Folder, samples: &[(&InvItem, Classified)]) -> bo
     sizes.len() >= 2
 }
 
+/// Repeated brow and no-brow versions of the same tone identify a skin pack.
+/// A single version label can also appear on a cosmetic or a mixed shelf.
+fn skin_tone_pack(inv: &Inventory, root: &super::Folder) -> bool {
+    if !root.children.is_empty() || !(6..=200).contains(&root.items.len()) {
+        return false;
+    }
+    let Some(prefix) = skin_pack_prefix(&root.info.name) else {
+        return false;
+    };
+    let mut tones = HashMap::<Vec<String>, (bool, bool)>::new();
+    for item in root.items.iter().filter_map(|id| inv.items.get(id)) {
+        if !matches!(item.asset_type, 5 | 6 | 13) {
+            continue;
+        }
+        let Some((name, label)) = item.name.trim().strip_suffix(']').and_then(|part| part.rsplit_once('[')) else {
+            continue;
+        };
+        let label = label.trim().to_ascii_lowercase();
+        let without = match label.as_str() {
+            "brow" | "brows" => false,
+            "nb" | "no brow" | "no brows" => true,
+            _ => continue,
+        };
+        let tone = words(name);
+        if !tone.starts_with(&prefix)
+            || tone.len() <= prefix.len()
+            || !matches!(classify(name, -1, 0).category, None | Some(Category::Skins | Category::Makeup))
+            || !matches!(
+                Category::of_asset(item.asset_type, item.flags),
+                None | Some(Category::Skins | Category::Tattoos)
+            )
+        {
+            return false;
+        }
+        let pair = tones.entry(tone).or_default();
+        if without {
+            pair.1 = true;
+        } else {
+            pair.0 = true;
+        }
+    }
+    let pairs = tones.values().filter(|&&(with, without)| with && without).count();
+    pairs >= 3 && pairs * 4 >= root.items.len()
+}
+
+fn skin_pack_prefix(name: &str) -> Option<Vec<String>> {
+    let mut title = delivery_title(name);
+    let marked = has(&title, "fatpack")
+        || has(&title, "fat pack")
+        || title.last().is_some_and(|word| word == "fp")
+        || delivery_mark(name) == Some(Mark::Strong);
+    let prefix_len = enclosed_tag(name).map_or(2, |(tag, _)| words(tag).len() + 1);
+    if !marked || title.len() <= prefix_len {
+        return None;
+    }
+    title.truncate(prefix_len);
+    Some(title)
+}
+
+/// A delivery may bundle tone ranges in separate subfolders. Require the
+/// same product name and paired brow variants in every range.
+fn skin_tone_delivery(inv: &Inventory, root: &super::Folder) -> bool {
+    if root.children.is_empty() {
+        return skin_tone_pack(inv, root);
+    }
+    if !(2..=8).contains(&root.children.len()) {
+        return false;
+    }
+    let Some(prefix) = skin_pack_prefix(&root.info.name) else {
+        return false;
+    };
+    if !root.children.iter().all(|id| {
+        inv.folders.get(id).is_some_and(|range| {
+            range.state == FetchState::Fetched && skin_pack_prefix(&range.info.name).as_ref() == Some(&prefix) && skin_tone_pack(inv, range)
+        })
+    }) {
+        return false;
+    }
+    let mut related = 0;
+    let mut objects = 0;
+    for item in root.items.iter().filter_map(|id| inv.items.get(id)) {
+        if matches!(item.asset_type, 3 | 7 | 24 | 25) {
+            continue;
+        }
+        objects += 1;
+        related += usize::from(words(&item.name).starts_with(&prefix));
+    }
+    related * 4 >= objects * 3
+}
+
 /// Where a folder whose name says nothing goes, from what it holds: the
 /// destination most of its objects, clothing, body parts, animations and
 /// gestures read as when at least three in five agree. A pack already
@@ -4765,7 +4858,11 @@ fn modular_floor(root: &super::Folder, samples: &[(&InvItem, Classified)]) -> bo
 /// Asset-only packs can also be identified from their native types.
 fn target_from_items(inv: &Inventory, folder: Uuid, prefs: &Preferences, shop: Option<&str>, named_set: bool) -> Option<Dest> {
     const READ: usize = 200;
-    if !named_set && let Some(category) = inv.folders.get(&folder).and_then(|root| numbered_product_category(inv, root)) {
+    if let Some(category) = inv.folders.get(&folder).and_then(|root| {
+        skin_tone_delivery(inv, root)
+            .then_some(Category::Skins)
+            .or_else(|| (!named_set).then(|| numbered_product_category(inv, root)).flatten())
+    }) {
         let mut path = vec![category_folder(category)];
         path.extend(shop.map(str::to_owned));
         return Some(Dest::Path(path));

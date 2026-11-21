@@ -159,7 +159,14 @@
         "scars",
         "bruises",
         "bandages",
-        "arm bandage"
+        "arm bandage",
+        "body pores",
+        "body gore",
+        "side gash",
+        "body gash",
+        "stretch marks",
+        "body wounds",
+        "tattoo overlay"
       ]
     },
     {
@@ -200,7 +207,19 @@
         "lashes",
         "eyelash",
         "contour",
-        "highlighter"
+        "highlighter",
+        "body oil",
+        "beauty marks",
+        "eye fix",
+        "lip kit",
+        "lip kits",
+        "lipkit",
+        "lash applier",
+        "lash appliers",
+        "lash set",
+        "eye shadows",
+        "lippie",
+        "lippies"
       ]
     },
     {
@@ -506,7 +525,12 @@
         "jewellery",
         "pendant",
         "septum",
-        "evil eye"
+        "evil eye",
+        "bodychain",
+        "bodychains",
+        "body chain",
+        "body chains",
+        "rose gauges"
       ]
     },
     {
@@ -645,7 +669,16 @@
         "belts",
         "masks",
         "caps",
-        "scarves"
+        "scarves",
+        "adornments",
+        "halo crown",
+        "crown halo",
+        "saint halo",
+        "devil halo",
+        "holdable phone",
+        "held phone",
+        "bento phone",
+        "drink tumbler"
       ]
     },
     {
@@ -810,7 +843,22 @@
         "folding screen",
         "folding screens",
         "bathtubs",
-        "tub"
+        "tub",
+        "wood stove",
+        "wood stoves",
+        "cook stove",
+        "dish rack",
+        "dish racks",
+        "tea machine",
+        "coffee pod rack",
+        "wall library",
+        "laundry room cabinets",
+        "storage lockers",
+        "ice cream display",
+        "ice cream displays",
+        "ice cream counter",
+        "toaster kettle",
+        "toaster and kettle"
       ]
     },
     {
@@ -1205,7 +1253,41 @@
         "terrarium",
         "fireworks",
         "dinnerware",
-        "tray"
+        "tray",
+        "barn",
+        "barns",
+        "farmhouse",
+        "halloween house",
+        "haunted house",
+        "garden sheds",
+        "shopfront",
+        "shop front",
+        "storefront",
+        "shop building",
+        "pub filler building",
+        "highstreet shop",
+        "street fair trailer",
+        "market booth",
+        "market booths",
+        "wall decal",
+        "wall decals",
+        "wall pocket",
+        "wall scroll",
+        "living wall",
+        "coffin cooler",
+        "archway",
+        "archways",
+        "flower garden",
+        "mushroom fort",
+        "water underbrush",
+        "glow alphabet",
+        "floral light",
+        "floral lights",
+        "terrain kit",
+        "sewer grate",
+        "building facades",
+        "pathway kit",
+        "floral arrangement"
       ]
     },
     {
@@ -1233,7 +1315,18 @@
         "puppy",
         "kitten",
         "breedable",
-        "companion"
+        "companion",
+        "wolf rideable",
+        "rideable wolf",
+        "deer rideable",
+        "rideable deer",
+        "rideable pet",
+        "rideable companion",
+        "rideable horse",
+        "horse rideable",
+        "rideable dragon",
+        "dragon rideable",
+        "mesh parrot"
       ]
     },
     {
@@ -1327,7 +1420,12 @@
         "texture resource packs",
         "uv map set",
         "diffuse texture pack",
-        "texture libraries"
+        "texture libraries",
+        "texture set",
+        "texture sets",
+        "pbr texture",
+        "pbr textures",
+        "basecolor map"
       ]
     },
     {
@@ -1365,7 +1463,12 @@
         "redelivery script",
         "update checker script",
         "landmark giver script",
-        "notecard giver script"
+        "notecard giver script",
+        "hud maker",
+        "hud builder",
+        "hud creator",
+        "resizer script",
+        "setup scripts"
       ]
     },
     {
@@ -1385,7 +1488,12 @@
         "animesh",
         "animated mesh object",
         "animated mesh objects",
-        "animated follower"
+        "animated follower",
+        "animated moths",
+        "animated bats",
+        "animated crow",
+        "animated crows",
+        "animated gator"
       ]
     },
     {
