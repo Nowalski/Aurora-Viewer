@@ -864,6 +864,19 @@
     {
       "category": "decor",
       "words": [
+        "swamp kit",
+        "swamp kits",
+        "bayou kit",
+        "bayou kits",
+        "swamp ground",
+        "swamp ferns",
+        "floating water vines",
+        "path building set",
+        "path building sets",
+        "woodland path kit",
+        "woodland path kits",
+        "cliff building set",
+        "cliff building sets",
         "bouquet vines",
         "floral bouquet grass",
         "circus tent",
@@ -1423,6 +1436,8 @@
         "texture libraries",
         "texture set",
         "texture sets",
+        "texture pack",
+        "texture packs",
         "pbr texture",
         "pbr textures",
         "basecolor map"

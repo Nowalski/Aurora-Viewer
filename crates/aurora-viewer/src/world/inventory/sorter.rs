@@ -2060,7 +2060,7 @@ fn judge_product_folder(inv: &Inventory, folder: Uuid, reserved: &HashSet<String
     if f.info.type_default != -1 || reserved.contains(&name.to_lowercase()) {
         return false;
     }
-    if skin_tone_delivery(inv, f) {
+    if skin_tone_delivery(inv, f) || tiled_texture_pack(inv, f) {
         return true;
     }
     let has_folders = f.children.iter().any(|c| inv.folders.contains_key(c));
@@ -4851,6 +4851,54 @@ fn skin_tone_delivery(inv: &Inventory, root: &super::Folder) -> bool {
     related * 4 >= objects * 3
 }
 
+/// One terrain texture pack can be named only for a season and resolution.
+/// Require native images with different coordinates on the same named grid.
+fn tiled_texture_pack(inv: &Inventory, root: &super::Folder) -> bool {
+    if !root.children.is_empty() || !(6..=200).contains(&root.items.len()) {
+        return false;
+    }
+    let mut title = delivery_title(&root.info.name);
+    let scale_tag = title.last().is_some_and(|word| matches!(word.as_str(), "prim" | "sim"));
+    if scale_tag {
+        title.pop();
+    }
+    let Some((size, name)) = title.split_last() else { return false };
+    if !matches!(size.as_str(), "256" | "512" | "1024" | "2048") {
+        return false;
+    }
+    let stem = match name.iter().rposition(|word| word == "terrain") {
+        Some(terrain) => &name[terrain + 1..],
+        None if scale_tag => name,
+        None => return false,
+    };
+    if stem.is_empty() {
+        return false;
+    }
+    let mut coordinates = HashSet::new();
+    for item in root.items.iter().filter_map(|id| inv.items.get(id)) {
+        if matches!(item.asset_type, 3 | 7) {
+            continue;
+        }
+        if Category::of_asset(item.asset_type, item.flags) != Some(Category::Textures) {
+            return false;
+        }
+        let words = words(&item.name);
+        let Some([resolution, x, y]) = words.get(stem.len()..) else {
+            return false;
+        };
+        if resolution != size || !words.starts_with(stem) {
+            return false;
+        }
+        let (Ok(x), Ok(y)) = (x.parse::<u16>(), y.parse::<u16>()) else {
+            return false;
+        };
+        if !coordinates.insert((x, y)) {
+            return false;
+        }
+    }
+    coordinates.len() >= 6
+}
+
 /// Where a folder whose name says nothing goes, from what it holds: the
 /// destination most of its objects, clothing, body parts, animations and
 /// gestures read as when at least three in five agree. A pack already
@@ -4975,9 +5023,11 @@ fn target_from_items(inv: &Inventory, folder: Uuid, prefs: &Preferences, shop: O
     // when neither body has a majority. Demo variants alone cannot make
     // a shop folder holding a demo and a full purchase look like one pack.
     let mut kinds: HashMap<Category, (usize, HashSet<Body>)> = HashMap::new();
-    for (_, found) in samples.into_iter().filter(|(it, _)| !demos::is_demo(&it.name)) {
+    for (item, found) in samples.into_iter().filter(|(it, _)| !demos::is_demo(&it.name)) {
         if let Some(category) = found.category
-            && clothing_fit_category(Some(category))
+            && (clothing_fit_category(Some(category))
+                || matches!(category, Category::Skins | Category::Tattoos | Category::BodyAddons)
+                    && Category::of_asset(item.asset_type, item.flags) == Some(category))
         {
             let (count, bodies) = kinds.entry(category).or_default();
             *count += 1;
@@ -5219,7 +5269,11 @@ fn plan_with(
             let to = if let Some(to) = rule_target {
                 Some(to)
             } else {
-                found.category = category_past_store(&name, asset_type, found.category);
+                found.category = if folder && inv.folders.get(&id).is_some_and(|root| tiled_texture_pack(inv, root)) {
+                    Some(Category::Textures)
+                } else {
+                    category_past_store(&name, asset_type, found.category)
+                };
                 let observed_store = creator
                     .zip(bare_store_prefix(&name))
                     .and_then(|(creator, prefix)| observed_stores.get(&(creator, prefix.to_lowercase())))

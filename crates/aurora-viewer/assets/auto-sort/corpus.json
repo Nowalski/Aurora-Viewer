@@ -989,6 +989,21 @@
    "name": "Side Gash BOM",
    "type": 6,
    "expect": "{tattoos}"
+  },
+  {
+   "name": "Riverside Swamp Kit [Add Me]",
+   "type": -1,
+   "expect": "{decor}"
+  },
+  {
+   "name": "Autumn Stone Path Building Set",
+   "type": -1,
+   "expect": "{decor}"
+  },
+  {
+   "name": "Autumnal Terrain Texture Pack",
+   "type": -1,
+   "expect": "{textures}"
   }
  ]
 }

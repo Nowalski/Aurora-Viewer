@@ -5055,6 +5055,66 @@ fn opaque_asset_packs_use_consistent_native_types_and_keep_their_contents() {
 }
 
 #[test]
+fn numbered_terrain_images_move_as_a_texture_pack() {
+    let mut inv = fixture(&[]);
+    add_folder(&mut inv, 70, OBJECTS, "Garden Shed 1024 (prim)");
+    add_folder(&mut inv, 71, OBJECTS, "Aster Terrain - Winter Snow 512");
+    add_folder(&mut inv, 72, OBJECTS, "Meadow Dusk 1024 (sim)");
+    for i in 0..6 {
+        add_typed(&mut inv, 201 + i, 70, &format!("garden-shed-1024-1-{i}"), NEW, 0);
+        add_typed(&mut inv, 211 + i, 71, &format!("winter-snow-512-2-{i}"), NEW, 19);
+        add_item(&mut inv, 221 + i, 72, &format!("meadow-dusk-1024-3-{i}"), NEW);
+    }
+    add_typed(&mut inv, 230, 70, "Installation notes", NEW, 7);
+    assert_eq!(classify("Garden Shed 1024 (prim)", -1, 0).category, Some(Category::Decor));
+    assert!(tiled_texture_pack(&inv, &inv.folders[&id(70)]));
+    assert!(tiled_texture_pack(&inv, &inv.folders[&id(71)]));
+    assert!(!tiled_texture_pack(&inv, &inv.folders[&id(72)]));
+    let prefs = Preferences::default();
+    let none = HashSet::new();
+    for planned in [
+        plan_whole(&inv, &prefs, &none, &none),
+        plan(&inv, id(OBJECTS), &prefs, &none, &none),
+    ] {
+        let mut textures: Vec<_> = planned
+            .moves
+            .iter()
+            .filter(|m| m.to == Dest::Path(vec![category_folder(Category::Textures)]))
+            .map(|m| m.id)
+            .collect();
+        textures.sort_unstable();
+        assert_eq!(textures, [id(70), id(71)]);
+    }
+    inv.items.get_mut(&id(202)).expect("tile").name = "Garden Shed 1024 1-0".into();
+    assert!(!tiled_texture_pack(&inv, &inv.folders[&id(70)]));
+}
+
+#[test]
+fn native_tattoo_deliveries_agree_across_body_fits() {
+    let mut inv = fixture(&[]);
+    add_folder(&mut inv, 70, OBJECTS, "[Harbor Vale] Azure Mark [Boxed]");
+    for (i, body) in ["Reborn", "Maitreya", "Kupra"].into_iter().enumerate() {
+        let entry = 201 + i as u128;
+        add_typed(&mut inv, entry, 70, &format!("Azure Mark {body}"), NEW, 5);
+        inv.items.get_mut(&id(entry)).expect("tattoo").flags = 14;
+    }
+    let prefs = Preferences::default();
+    let none = HashSet::new();
+    let plan = plan_whole(&inv, &prefs, &none, &none);
+    assert_eq!(plan.moves.len(), 1, "{:?}", plan.moves);
+    assert_eq!(plan.moves[0].id, id(70));
+    assert_eq!(
+        plan.moves[0].to,
+        Dest::Path(vec![Body::Several.folder(), category_folder(Category::Tattoos)])
+    );
+
+    for entry in 201..204 {
+        inv.items.get_mut(&id(entry)).expect("item").asset_type = 6;
+    }
+    assert_eq!(target_from_items(&inv, id(70), &prefs, None, false), None);
+}
+
+#[test]
 fn opaque_script_deliveries_use_native_payload_and_keep_the_guide() {
     let mut inv = fixture(&[]);
     add_folder(&mut inv, 70, OBJECTS, "Kestrel [boxed]");
