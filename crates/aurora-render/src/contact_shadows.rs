@@ -704,10 +704,13 @@ impl Filter {
     /// the AMD RX 9000 cards ([`Variant::NoShared`]), which keep the filter
     /// without an atomic in workgroup memory, like their pass.
     fn new(device: &wgpu::Device, skip_lit: bool) -> Self {
-        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("contact shadows filter"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/contact_shadows_filter.wgsl").into()),
-        });
+        let module_of = |source: String| {
+            device.create_shader_module(wgpu::ShaderModuleDescriptor {
+                label: Some("contact shadows filter"),
+                source: wgpu::ShaderSource::Wgsl(source.into()),
+            })
+        };
+        let (module, module_half) = (module_of(filter_source(false)), module_of(filter_source(true)));
         let texture = |binding: u32, sample_type: wgpu::TextureSampleType| wgpu::BindGroupLayoutEntry {
             binding,
             visibility: wgpu::ShaderStages::COMPUTE,
@@ -741,11 +744,11 @@ impl Filter {
             bind_group_layouts: &[Some(&layout)],
             immediate_size: 0,
         });
-        let make = |entry: &'static str, constants: &[(&str, f64)]| {
+        let make_from = |module: &wgpu::ShaderModule, entry: &'static str, constants: &[(&str, f64)]| {
             device.create_compute_pipeline_cached(&wgpu::ComputePipelineDescriptor {
                 label: Some("contact shadows filter"),
                 layout: Some(&pl),
-                module: &module,
+                module,
                 entry_point: Some(entry),
                 compilation_options: wgpu::PipelineCompilationOptions {
                     constants,
@@ -756,13 +759,28 @@ impl Filter {
         };
         let skip = f64::from(skip_lit);
         Filter {
-            soft: make("main", &[("SKIP_LIT", skip)]),
-            copy: make("copy", &[]),
-            soft_half: make("main", &[("SKIP_LIT", skip), ("HALF", 1.0)]),
-            copy_half: make("copy", &[("HALF", 1.0)]),
+            soft: make_from(&module, "main", &[("SKIP_LIT", skip)]),
+            copy: make_from(&module, "copy", &[]),
+            soft_half: make_from(&module_half, "main", &[("SKIP_LIT", skip), ("HALF", 1.0)]),
+            copy_half: make_from(&module_half, "copy", &[("HALF", 1.0)]),
             layout,
         }
     }
+}
+
+/// The filter's shader, with the half-resolution upsample's block depths in
+/// workgroup memory when `half`. At full resolution the array is left out
+/// (its reads become the tile's own depth, behind `HALF` off): kept, its
+/// 0.6 KB of workgroup memory slowed the filter by 0.6 to 1.2 ms of 18 on
+/// an integrated Radeon at 1920 x 1080 (fewer workgroups at once).
+pub(crate) fn filter_source(half: bool) -> String {
+    let source = include_str!("shaders/contact_shadows_filter.wgsl");
+    if half {
+        return source.to_owned();
+    }
+    let declaration = "var<workgroup> tile_block: array<f32, 144>;";
+    assert!(source.contains(declaration), "contact shadows filter: no `{declaration}`");
+    source.replacen(declaration, "", 1).replace("tile_block[", "tile_depth[")
 }
 
 /// `AURORA_CONTACT_SOFT=0`: the mask reaches the shading as the pass wrote
