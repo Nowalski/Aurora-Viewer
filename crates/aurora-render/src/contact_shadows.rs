@@ -18,6 +18,13 @@
 //! are blended though they look opaque) and the impostor cards; those
 //! blended faces then also receive them.
 //!
+//! From [`HALF_RES_PIXELS`] the pass traces at half resolution
+//! ([`Resolution`]): over the nearest depth of each 2 x 2 block
+//! (shaders/contact_shadows_half.wgsl), with half the samples for the same
+//! length on screen, and the filter brings the mask back to the window's
+//! pixels along the depth (`HALF`, contact_shadows_filter.wgsl).
+//! `AURORA_CONTACT_RES=full|half` chooses one for a comparison.
+//!
 //! `AURORA_CONTACT_SHADOWS=0|1|alt|prepass|shell` overrides the setting for
 //! a comparison; `alt` switches every second, `prepass`: the prepass alone
 //! casts (before the blended faces and the cards were added), `shell`: the
@@ -91,6 +98,62 @@ pub fn tile_reach(on: bool, scale: f32) -> u32 {
         0
     }
 }
+
+/// From this many pixels the pass traces at half resolution, as the
+/// ambient occlusion does from the same size (`HALF_RES_PIXELS`, gtao.rs):
+/// a 1080p screen and anything larger. A quarter of the pixels with half
+/// the samples each is an eighth of the trace; the shadow keeps its length
+/// on screen, and the filter, which already spread each pixel's shadow over
+/// 5 x 5 pixels of its surface, upsamples it along the depth.
+pub(crate) const HALF_RES_PIXELS: u64 = 1_800_000;
+
+/// Whether the pass traces at full or half resolution:
+/// `AURORA_CONTACT_RES=full|half`, otherwise by the window's size
+/// ([`HALF_RES_PIXELS`]).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Resolution {
+    Auto,
+    Full,
+    Half,
+}
+
+impl Resolution {
+    pub(crate) fn parse(v: Option<&str>) -> Self {
+        match v.map(|v| v.trim().to_ascii_lowercase()).as_deref() {
+            Some("full" | "1") => Resolution::Full,
+            Some("half" | "2") => Resolution::Half,
+            _ => Resolution::Auto,
+        }
+    }
+
+    pub(crate) fn from_env() -> Self {
+        static RES: std::sync::OnceLock<Resolution> = std::sync::OnceLock::new();
+        *RES.get_or_init(|| {
+            let r = Resolution::parse(std::env::var("AURORA_CONTACT_RES").ok().as_deref());
+            if r != Resolution::Auto {
+                log::info!("contact shadows: {r:?} resolution (AURORA_CONTACT_RES)");
+            }
+            r
+        })
+    }
+
+    /// Whether a window of `width` x `height` traces at half resolution.
+    pub(crate) fn half(self, width: u32, height: u32) -> bool {
+        match self {
+            Resolution::Full => false,
+            Resolution::Half => true,
+            Resolution::Auto => u64::from(width) * u64::from(height) >= HALF_RES_PIXELS,
+        }
+    }
+}
+
+/// The samples of the half-resolution trace: half of Bend's, the same
+/// length on screen, and as many fading out in proportion.
+const HALF_SAMPLES: (i32, i32) = (30, 2);
+
+/// The block depth of the half-resolution trace: the pass reads it as a
+/// depth texture, like the prepass, whatever that one's format.
+const HALF_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
 /// Bend's starting values (DispatchParameters::SetDefaults): the surface
 /// thickness is a share of the depth left to the far plane (0.5 %: about
@@ -537,6 +600,91 @@ pub(crate) struct ContactShadows {
     /// The window's shader ([`Variant::for_adapter`]); `Skip` dispatches no
     /// wavefront, `NoShared` makes the photo's without workgroup memory too.
     variant: Variant,
+    half: HalfPass,
+    /// Whether this frame traces at half resolution (`write`, then
+    /// `encode`): targets that have it, a window's samples (a photo larger
+    /// than the viewfinder keeps the full resolution), a shader to run.
+    half_now: bool,
+}
+
+/// The half-resolution trace: the block depth's pipeline and the pass's
+/// with [`HALF_SAMPLES`].
+struct HalfPass {
+    pipeline: wgpu::ComputePipeline,
+    down: wgpu::RenderPipeline,
+    down_layout: wgpu::BindGroupLayout,
+}
+
+impl HalfPass {
+    fn new(device: &wgpu::Device, variant: Variant, pipeline_layout: &wgpu::PipelineLayout) -> Self {
+        let (count, hard) = HALF_SAMPLES;
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("contact shadows (half)"),
+            source: wgpu::ShaderSource::Wgsl(photo_source(variant, count, hard).into()),
+        });
+        let pipeline = device.create_compute_pipeline_cached(&wgpu::ComputePipelineDescriptor {
+            label: Some("contact shadows (half)"),
+            layout: Some(pipeline_layout),
+            module: &module,
+            entry_point: Some("main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let down_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("contact shadows half depth"),
+            entries: &[wgpu::BindGroupLayoutEntry {
+                binding: 0,
+                visibility: wgpu::ShaderStages::FRAGMENT,
+                ty: wgpu::BindingType::Texture {
+                    sample_type: wgpu::TextureSampleType::Depth,
+                    view_dimension: wgpu::TextureViewDimension::D2,
+                    multisampled: false,
+                },
+                count: None,
+            }],
+        });
+        let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("contact shadows half depth"),
+            bind_group_layouts: &[Some(&down_layout)],
+            immediate_size: 0,
+        });
+        let module = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("contact shadows half depth"),
+            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/contact_shadows_half.wgsl").into()),
+        });
+        let down = device.create_render_pipeline_cached(&wgpu::RenderPipelineDescriptor {
+            label: Some("contact shadows half depth"),
+            layout: Some(&pl),
+            vertex: wgpu::VertexState {
+                module: &module,
+                entry_point: Some("vs"),
+                compilation_options: Default::default(),
+                buffers: &[],
+            },
+            primitive: Default::default(),
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: HALF_DEPTH_FORMAT,
+                depth_write_enabled: Some(true),
+                depth_compare: Some(wgpu::CompareFunction::Always),
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            fragment: Some(wgpu::FragmentState {
+                module: &module,
+                entry_point: Some("fs"),
+                compilation_options: Default::default(),
+                targets: &[],
+            }),
+            multiview_mask: None,
+            cache: None,
+        });
+        HalfPass {
+            pipeline,
+            down,
+            down_layout,
+        }
+    }
 }
 
 /// The softening of the mask before the shading reads it
@@ -544,6 +692,9 @@ pub(crate) struct ContactShadows {
 struct Filter {
     soft: wgpu::ComputePipeline,
     copy: wgpu::ComputePipeline,
+    /// The same from the half-resolution mask (`HALF`).
+    soft_half: wgpu::ComputePipeline,
+    copy_half: wgpu::ComputePipeline,
     layout: wgpu::BindGroupLayout,
 }
 
@@ -582,6 +733,7 @@ impl Filter {
                     },
                     count: None,
                 },
+                texture(3, wgpu::TextureSampleType::Depth),
             ],
         });
         let pl = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -602,9 +754,12 @@ impl Filter {
                 cache: None,
             })
         };
+        let skip = f64::from(skip_lit);
         Filter {
-            soft: make("main", &[("SKIP_LIT", f64::from(skip_lit))]),
+            soft: make("main", &[("SKIP_LIT", skip)]),
             copy: make("copy", &[]),
+            soft_half: make("main", &[("SKIP_LIT", skip), ("HALF", 1.0)]),
+            copy_half: make("copy", &[("HALF", 1.0)]),
             layout,
         }
     }
@@ -630,6 +785,8 @@ pub(crate) struct Targets {
     filter_group_more: wgpu::BindGroup,
     depth_texture: wgpu::Texture,
     depth: wgpu::TextureView,
+    /// The half-resolution trace's, from [`HALF_RES_PIXELS`] ([`Resolution`]).
+    half: Option<HalfTargets>,
     /// The shadow in `.r`, 0 lit, 1 in contact shadow, softened; read by the
     /// shading.
     pub result: wgpu::TextureView,
@@ -639,6 +796,21 @@ pub(crate) struct Targets {
 }
 
 const RESULT_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// The block depth and the mask of the half-resolution trace, and their
+/// bind groups.
+struct HalfTargets {
+    size: (u32, u32),
+    depth: wgpu::TextureView,
+    /// The block depth's, from the prepass and from `Targets::depth`.
+    down_group: wgpu::BindGroup,
+    down_group_more: wgpu::BindGroup,
+    /// The pass's, reading the block depth into the half mask.
+    group: wgpu::BindGroup,
+    /// The filter's, from the half mask to `Targets::result`.
+    filter_group: wgpu::BindGroup,
+    filter_group_more: wgpu::BindGroup,
+}
 
 impl Targets {
     /// The copy of the prepass the other casters are drawn into.
@@ -722,6 +894,7 @@ impl ContactShadows {
             usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
+        let half = HalfPass::new(device, variant, &pl);
         ContactShadows {
             pipeline,
             photo: None,
@@ -735,6 +908,8 @@ impl ContactShadows {
             list: DispatchList::default(),
             filter,
             variant,
+            half,
+            half_now: false,
         }
     }
 
@@ -774,8 +949,22 @@ impl ContactShadows {
         width: u32,
         height: u32,
     ) -> Targets {
+        let half = Resolution::from_env().half(width, height);
+        self.targets_at(device, depth, depth_format, width, height, half)
+    }
+
+    /// [`Self::targets`], tracing at half resolution when `half`.
+    fn targets_at(
+        &self,
+        device: &wgpu::Device,
+        depth: &wgpu::TextureView,
+        depth_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        half: bool,
+    ) -> Targets {
         let size = (width.max(1), height.max(1));
-        let mask = |label: &str| {
+        let mask_of = |label: &str, size: (u32, u32)| {
             device
                 .create_texture(&wgpu::TextureDescriptor {
                     label: Some(label),
@@ -797,6 +986,7 @@ impl ContactShadows {
                 })
                 .create_view(&wgpu::TextureViewDescriptor::default())
         };
+        let mask = |label: &str| mask_of(label, size);
         // the pass writes `raw`, the filter `result`
         let (raw, result) = (mask("contact shadows raw"), mask("contact shadows"));
         let depth_texture = device.create_texture(&wgpu::TextureDescriptor {
@@ -814,7 +1004,7 @@ impl ContactShadows {
             view_formats: &[],
         });
         let own_depth = depth_texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let group = |depth: &wgpu::TextureView| {
+        let group_into = |depth: &wgpu::TextureView, raw: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("contact shadows"),
                 layout: &self.layout,
@@ -833,12 +1023,15 @@ impl ContactShadows {
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
-                        resource: wgpu::BindingResource::TextureView(&raw),
+                        resource: wgpu::BindingResource::TextureView(raw),
                     },
                 ],
             })
         };
-        let filter_group = |depth: &wgpu::TextureView| {
+        let group = |depth: &wgpu::TextureView| group_into(depth, &raw);
+        // `traced`: the depth the mask was traced over (binding 3), the
+        // block depth at half resolution
+        let filter_group_from = |depth: &wgpu::TextureView, raw: &wgpu::TextureView, traced: &wgpu::TextureView| {
             device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: Some("contact shadows filter"),
                 layout: &self.filter.layout,
@@ -849,15 +1042,59 @@ impl ContactShadows {
                     },
                     wgpu::BindGroupEntry {
                         binding: 1,
-                        resource: wgpu::BindingResource::TextureView(&raw),
+                        resource: wgpu::BindingResource::TextureView(raw),
                     },
                     wgpu::BindGroupEntry {
                         binding: 2,
                         resource: wgpu::BindingResource::TextureView(&result),
                     },
+                    wgpu::BindGroupEntry {
+                        binding: 3,
+                        resource: wgpu::BindingResource::TextureView(traced),
+                    },
                 ],
             })
         };
+        let filter_group = |depth: &wgpu::TextureView| filter_group_from(depth, &raw, depth);
+        let half = half.then(|| {
+            let half_size = (size.0.div_ceil(2), size.1.div_ceil(2));
+            let half_depth = device
+                .create_texture(&wgpu::TextureDescriptor {
+                    label: Some("contact shadows half depth"),
+                    size: wgpu::Extent3d {
+                        width: half_size.0,
+                        height: half_size.1,
+                        depth_or_array_layers: 1,
+                    },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: HALF_DEPTH_FORMAT,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+                    view_formats: &[],
+                })
+                .create_view(&wgpu::TextureViewDescriptor::default());
+            let half_raw = mask_of("contact shadows half", half_size);
+            let down_group = |depth: &wgpu::TextureView| {
+                device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: Some("contact shadows half depth"),
+                    layout: &self.half.down_layout,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(depth),
+                    }],
+                })
+            };
+            HalfTargets {
+                size: half_size,
+                down_group: down_group(depth),
+                down_group_more: down_group(&own_depth),
+                group: group_into(&half_depth, &half_raw),
+                filter_group: filter_group_from(depth, &half_raw, &half_depth),
+                filter_group_more: filter_group_from(&own_depth, &half_raw, &half_depth),
+                depth: half_depth,
+            }
+        });
         Targets {
             size,
             group: group(depth),
@@ -866,6 +1103,7 @@ impl ContactShadows {
             filter_group_more: filter_group(&own_depth),
             depth_texture,
             depth: own_depth,
+            half,
             result,
             #[cfg(test)]
             raw,
@@ -879,7 +1117,12 @@ impl ContactShadows {
     /// the encoder runs.
     pub(crate) fn write(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, t: &Targets, light: [f32; 4], near: f32, scale: f32) {
         self.prepare(device, scale);
-        let (w, h) = (t.size.0 as i32, t.size.1 as i32);
+        self.half_now = t.half.is_some() && self.samples == samples(1.0) && self.variant != Variant::Skip;
+        let size = match &t.half {
+            Some(half) if self.half_now => half.size,
+            _ => t.size,
+        };
+        let (w, h) = (size.0 as i32, size.1 as i32);
         self.list = build_dispatch_list(light, [w, h], [0, 0], [w, h], WAVE_SIZE);
         let occluder = occluder_units(Override::from_env().occluder_depth(), near);
         let mut bytes = vec![0u8; (self.stride as usize) * self.list.count];
@@ -905,11 +1148,34 @@ impl ContactShadows {
     /// emptying it. Then the filter softens the mask into `result`, over the
     /// same depth.
     pub(crate) fn encode(&self, encoder: &mut wgpu::CommandEncoder, t: &Targets, more: bool) {
-        let (group, filter_group) = if more {
-            (&t.group_more, &t.filter_group_more)
-        } else {
-            (&t.group, &t.filter_group)
+        let half = t.half.as_ref().filter(|_| self.half_now);
+        let (group, filter_group) = match (half, more) {
+            (Some(h), true) => (&h.group, &h.filter_group_more),
+            (Some(h), false) => (&h.group, &h.filter_group),
+            (None, true) => (&t.group_more, &t.filter_group_more),
+            (None, false) => (&t.group, &t.filter_group),
         };
+        if let Some(h) = half {
+            // the block depth, from the depth the full pass would read
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("contact shadows half depth"),
+                color_attachments: &[],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &h.depth,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: wgpu::StoreOp::Store,
+                    }),
+                    stencil_ops: None,
+                }),
+                timestamp_writes: None,
+                occlusion_query_set: None,
+                multiview_mask: None,
+            });
+            pass.set_pipeline(&self.half.down);
+            pass.set_bind_group(0, if more { &h.down_group_more } else { &h.down_group }, &[]);
+            pass.draw(0..3, 0..1);
+        }
         let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
             label: Some("contact shadows"),
             timestamp_writes: None,
@@ -923,6 +1189,7 @@ impl ContactShadows {
             pass.dispatch_workgroups(1, 1, 1);
         }
         let pipeline = match &self.photo {
+            _ if half.is_some() => &self.half.pipeline,
             Some((s, photo)) if *s == self.samples => photo,
             _ => &self.pipeline,
         };
@@ -936,7 +1203,12 @@ impl ContactShadows {
             pass.set_bind_group(0, group, &[(i as u64 * self.stride) as u32]);
             pass.dispatch_workgroups(d.wave_count[0] as u32, d.wave_count[1] as u32, d.wave_count[2] as u32);
         }
-        pass.set_pipeline(if soft_from_env() { &self.filter.soft } else { &self.filter.copy });
+        pass.set_pipeline(match (half.is_some(), soft_from_env()) {
+            (false, true) => &self.filter.soft,
+            (false, false) => &self.filter.copy,
+            (true, true) => &self.filter.soft_half,
+            (true, false) => &self.filter.copy_half,
+        });
         pass.set_bind_group(0, filter_group, &[]);
         pass.dispatch_workgroups(t.size.0.div_ceil(8), t.size.1.div_ceil(8), 1);
     }
@@ -1454,5 +1726,44 @@ mod tests {
                 assert_eq!(left, 0, "{variant:?}, light {light:?}: {left} pixels keep what the mask held");
             }
         }
+        // the half-resolution trace: the same shadow but along its border,
+        // never on the sky
+        let result_at = |half: bool| -> Vec<u8> {
+            let mut cs = ContactShadows::with_variant(&device, Variant::Bend);
+            let t = cs.targets_at(&device, &depth_view, format, w, h, half);
+            cs.write(&device, &queue, &t, light, 0.1, 1.0);
+            assert_eq!(cs.half_now, half);
+            let mut encoder = device.create_command_encoder(&Default::default());
+            cs.encode(&mut encoder, &t, false);
+            queue.submit([encoder.finish()]);
+            read(t.result.texture())
+        };
+        let (full, half) = (result_at(false), result_at(true));
+        let dark = |m: &[u8]| m.iter().filter(|&&v| v > 128).count();
+        let (dark_full, dark_half) = (dark(&full), dark(&half));
+        assert!(
+            dark_half * 4 > dark_full * 3 && dark_half * 3 < dark_full * 4,
+            "half: {dark_half} pixels in shadow, full {dark_full}"
+        );
+        let apart = full.iter().zip(&half).filter(|(a, b)| a.abs_diff(**b) > 128).count();
+        assert!(
+            apart * 5 < dark_full,
+            "half: {apart} pixels differ from full ({dark_full} in shadow)"
+        );
+        let sky = (w * 20) as usize;
+        assert!(half[..sky].iter().all(|&v| v == 0), "half: no shadow on the sky");
+    }
+
+    #[test]
+    fn the_trace_halves_from_a_1080p_window() {
+        assert!(!Resolution::Auto.half(1600, 900));
+        assert!(Resolution::Auto.half(1920, 1080));
+        assert!(Resolution::Auto.half(3840, 2160));
+        assert!(!Resolution::Full.half(3840, 2160));
+        assert!(Resolution::Half.half(800, 600));
+        assert_eq!(Resolution::parse(Some(" Half ")), Resolution::Half);
+        assert_eq!(Resolution::parse(Some("full")), Resolution::Full);
+        assert_eq!(Resolution::parse(None), Resolution::Auto);
+        assert_eq!(HALF_RES_PIXELS, 1_800_000, "the ambient occlusion's threshold (gtao.rs)");
     }
 }

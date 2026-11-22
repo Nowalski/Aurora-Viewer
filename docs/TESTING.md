@@ -12819,6 +12819,7 @@ What the inventory must show with these scenarios:
 | `AURORA_SOFT_PROJECTORS=0` | With the soft shadows, the projectors keep their 5-tap shadows (to measure their cost apart) |
 | `AURORA_PROJECTOR_TRACE=1` | Log projector shadow selection and fades each frame |
 | `AURORA_CONTACT_SOFT=0` | Contact shadows with hard pixel edges (no softening) |
+| `AURORA_CONTACT_RES=full` or `half` | Contact shadows traced at full or half resolution (by default half from 1.8 MP, a 1080p window) |
 | `AURORA_CONTACT_VARIANT=bend`, `no-early-out`, `no-shared`, `short` or `skip` | Diagnostic: the contact shadows' shader without one of its constructs (GPU hangs of the AMD RX 9000 cards) |
 | `AURORA_BLOOM=0`, `1` or `alt` | Bloom off, on or one second in two for this launch |
 | `AURORA_AUTO_EXPOSURE=0`, `1` or `alt` | Automatic exposure of non-classic skies off, on or one second in two |
@@ -13416,6 +13417,15 @@ What the inventory must show with these scenarios:
   reflectionProbeF.glsl), with no margin either.
   - `exact`: the position itself, as before, in the main view.
   - `alt`: `exact` one second in two.
+  **`AURORA_CONTACT_RES=full`** or **`half`**: from 1.8 MP (a 1080p
+  window, as the ambient occlusion) the pass traces at half resolution,
+  over the nearest depth of each 2 x 2 block, with 30 samples for the
+  same length on screen, and the filter brings the mask back to the
+  window's pixels, each block's shadow given only to the pixels on its
+  plane; `full` keeps Bend's 60 samples on every pixel, `half` halves a
+  smaller window too. A photo larger than the viewfinder always traces in
+  full. Compare `AURORA_DEMO_FEET` and the plaza with both: the shadows
+  keep their length and their contact line.
 
   Demo: `AURORA_DEMO_PROBE_ROOM=1,inner,shiny` with
   `AURORA_DEMO_POS="100,100"` (the box's faces on the walls, the floor's
