@@ -46,6 +46,16 @@ SCENES = {
         {"AURORA_DEMO_ALPHA_MASK_AB": "planes:64:blend", "AURORA_DEMO_POS": "144,125", "AURORA_DEMO_TOD": "5"},
     ),
     "textures": ("9,000 textured cubes", {"AURORA_DEMO_TEXTURES": "9000"}),
+    "busy": (
+        "a busy region: 20 avatars, 3,000 textured cubes and 16 layers of cut-out panes",
+        {
+            "AURORA_DEMO_CROWD": "20",
+            "AURORA_DEMO_TEXTURES": "3000",
+            "AURORA_DEMO_ALPHA_MASK_AB": "planes:16:mask",
+            "AURORA_DEMO_POS": "144,125",
+            "AURORA_DEMO_TOD": "5",
+        },
+    ),
 }
 
 # every launch: the frame rate the GPU gives, no pacing wait, a stable sun
