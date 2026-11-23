@@ -258,6 +258,18 @@ impl SpecularOcclusion {
     }
 }
 
+/// The bent normal's own blur passes: [`BENT_BLUR`], or
+/// `AURORA_GTAO_BENT_BLUR=<0-3>` to measure what they cost.
+fn bent_blur() -> u32 {
+    static VALUE: std::sync::OnceLock<u32> = std::sync::OnceLock::new();
+    *VALUE.get_or_init(|| {
+        std::env::var("AURORA_GTAO_BENT_BLUR")
+            .ok()
+            .and_then(|v| v.trim().parse::<u32>().ok())
+            .map_or(BENT_BLUR, |v| v.min(BENT_BLUR))
+    })
+}
+
 /// `AURORA_GTAO_TEMPORAL`: the occlusion's accumulation over the frames.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Temporal {
@@ -1015,7 +1027,7 @@ impl Gtao {
         // result
         let passes = q.denoise_passes.max(1);
         let kinds: Vec<Blur> = std::iter::repeat_n(Blur::Both, passes as usize - 1)
-            .chain(std::iter::repeat_n(Blur::Bent, BENT_BLUR as usize))
+            .chain(std::iter::repeat_n(Blur::Bent, bent_blur() as usize))
             .chain(std::iter::once(Blur::Final))
             .collect();
         let chain = |first: &wgpu::TextureView, work: [&wgpu::TextureView; 2]| -> Vec<(wgpu::BindGroup, Blur)> {
